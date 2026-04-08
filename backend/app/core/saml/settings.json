@@ -1,0 +1,28 @@
+{
+  "strict": true,
+  "debug": false,
+  "sp": {
+    "entityId": "https://test-executor.company.com/api/auth/saml/metadata",
+    "assertionConsumerService": {
+      "url": "https://test-executor.company.com/api/auth/saml/acs",
+      "binding": "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST"
+    },
+    "singleLogoutService": {
+      "url": "https://test-executor.company.com/api/auth/saml/slo",
+      "binding": "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect"
+    },
+    "NameIDFormat": "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
+  },
+  "idp": {
+    "entityId": "https://idp.company.com/saml/metadata",
+    "singleSignOnService": {
+      "url": "https://idp.company.com/saml/sso",
+      "binding": "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect"
+    },
+    "singleLogoutService": {
+      "url": "https://idp.company.com/saml/slo",
+      "binding": "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect"
+    },
+    "x509cert": "REPLACE_WITH_IDP_CERTIFICATE"
+  }
+}

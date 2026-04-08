@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Test Runner</string>
+    <string name="accessibility_service_description">Test Runner accessibility service for UI tree inspection and element interaction during automated testing.</string>
+    <string name="btn_open_accessibility_settings">Enable Accessibility Service</string>
+    <string name="btn_connect_server">Connect to Server</string>
+    <string name="btn_disconnect_server">Disconnect</string>
+    <string name="hint_server_url">Server URL (ws://host:port)</string>
+    <string name="status_disconnected">Disconnected</string>
+    <string name="status_connected">Connected</string>
+    <string name="status_connecting">Connecting...</string>
+    <string name="accessibility_enabled">Accessibility Service: Enabled</string>
+    <string name="accessibility_disabled">Accessibility Service: Disabled</string>
+</resources>
