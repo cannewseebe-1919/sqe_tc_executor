@@ -2,6 +2,8 @@
 
 import json
 import os
+import re
+import shlex
 import subprocess
 import time
 from typing import Optional, Tuple
@@ -31,6 +33,11 @@ class _Device:
             self._screenshot_dir = os.environ.get("TC_SCREENSHOT_DIR", "screenshots")
             os.makedirs(self._screenshot_dir, exist_ok=True)
             self._initialized = True
+
+    @staticmethod
+    def _sanitize_shell_arg(value: str) -> str:
+        """Remove shell metacharacters to prevent command injection."""
+        return re.sub(r'[;&|`$(){}\\<>!\n\r]', '', value)
 
     def _adb_shell(self, command: str, timeout: float = 30) -> str:
         self._ensure_init()
@@ -121,11 +128,14 @@ class _Device:
 
     def input_text(self, text: str):
         """Type text into the currently focused field."""
-        escaped = text.replace(" ", "%s").replace("'", "\\'")
-        self._adb_shell(f"input text '{escaped}'")
+        sanitized = self._sanitize_shell_arg(text)
+        escaped = sanitized.replace(" ", "%s")
+        self._adb_shell(f"input text {shlex.quote(escaped)}")
 
     def press_key(self, key: str):
         """Press a key (back, home, enter, volume_up, volume_down, power, etc.)."""
+        if not re.match(r'^[a-zA-Z0-9_]+$', key):
+            raise ValueError(f"Invalid key name: {key}")
         keycode_map = {
             "back": "KEYCODE_BACK",
             "home": "KEYCODE_HOME",

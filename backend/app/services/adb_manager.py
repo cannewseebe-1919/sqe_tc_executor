@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import re
 from typing import Optional
 
 from app.core.config import get_settings
@@ -73,9 +74,14 @@ class ADBManager:
     ) -> str:
         return await self.shell(device_id, f"input swipe {x1} {y1} {x2} {y2} {duration}")
 
+    @staticmethod
+    def _sanitize(value: str) -> str:
+        """Remove shell metacharacters to prevent injection."""
+        return re.sub(r'[;&|`$(){}\\<>!\n\r]', '', value)
+
     async def input_text(self, device_id: str, text: str) -> str:
-        escaped = text.replace(" ", "%s").replace("'", "\\'")
-        return await self.shell(device_id, f"input text '{escaped}'")
+        sanitized = self._sanitize(text).replace(" ", "%s")
+        return await self.shell(device_id, f"input text '{sanitized}'")
 
     async def key_event(self, device_id: str, keycode: str) -> str:
         return await self.shell(device_id, f"input keyevent {keycode}")

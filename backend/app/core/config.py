@@ -45,6 +45,9 @@ class Settings(BaseSettings):
     # Crash detection
     LOGCAT_POLL_INTERVAL: float = 0.5
 
+    # CORS
+    CORS_ORIGINS: list[str] = ["http://localhost:3000", "http://localhost:3001"]
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
 

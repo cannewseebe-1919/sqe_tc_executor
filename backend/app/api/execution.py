@@ -25,8 +25,11 @@ router = APIRouter(prefix="/api/execute", tags=["execution"])
 @router.post("", response_model=ExecuteRequestOut)
 async def create_execution(req: ExecuteRequestIn, db: AsyncSession = Depends(get_db)):
     """Submit a test execution request."""
-    # Validate device exists and is reachable
-    device = await db.get(Device, req.device_id)
+    # Lock device row to prevent race condition on concurrent requests
+    result = await db.execute(
+        select(Device).where(Device.id == req.device_id).with_for_update()
+    )
+    device = result.scalar_one_or_none()
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
     if device.status == "OFFLINE":
@@ -42,12 +45,12 @@ async def create_execution(req: ExecuteRequestIn, db: AsyncSession = Depends(get
         status="QUEUED",
     )
     db.add(execution)
-    await db.commit()
-    await db.refresh(execution)
+    await db.flush()
 
-    # Enqueue
+    # Enqueue — use SELECT FOR UPDATE to prevent two requests
+    # from both seeing CONNECTED and both starting immediately
     if device.status == "CONNECTED":
-        # Device is free — run immediately
+        device.status = "TESTING"
         execution.status = "RUNNING"
         execution.queue_position = 0
         await db.commit()
@@ -56,7 +59,6 @@ async def create_execution(req: ExecuteRequestIn, db: AsyncSession = Depends(get
             execution_id=execution.id, status="RUNNING", queue_position=0
         )
     else:
-        # Device busy — add to queue
         pos = await scheduler.enqueue(device.id, execution.id)
         execution.queue_position = pos
         execution.status = "QUEUED"

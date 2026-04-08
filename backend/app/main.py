@@ -27,6 +27,13 @@ async def lifespan(app: FastAPI):
     """Startup / shutdown lifecycle."""
     logger.info("Starting %s ...", settings.APP_NAME)
 
+    # Validate critical settings
+    if settings.JWT_SECRET == "change-me-in-production":
+        logger.warning(
+            "JWT_SECRET is using the default value! "
+            "Set a strong secret in .env for production."
+        )
+
     # Create tables (dev convenience — use Alembic in production)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -55,7 +62,7 @@ app = FastAPI(
 # CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

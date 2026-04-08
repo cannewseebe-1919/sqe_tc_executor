@@ -1,9 +1,15 @@
-"""Test Runner Engine — executes TC Python scripts in subprocess."""
+"""Test Runner Engine — executes TC Python scripts in subprocess.
+
+SECURITY NOTE: TC scripts run as subprocess with restricted imports.
+In production, consider running in Docker container or seccomp sandbox.
+"""
 
 import asyncio
 import json
 import logging
 import os
+import re
+import shutil
 import tempfile
 import time
 import uuid
@@ -75,11 +81,36 @@ class TestRunner:
             crash_detector = CrashDetector(device.id, on_crash=on_crash)
             await crash_detector.start()
 
+            # Validate TC code — block dangerous imports/calls
+            tc_code = execution.test_code
+            dangerous_patterns = [
+                r'\bos\.system\s*\(', r'\bsubprocess\b', r'\b__import__\b',
+                r'\beval\s*\(', r'\bexec\s*\(', r'\bcompile\s*\(',
+                r'\bopen\s*\([^)]*["\']\/etc', r'\bimport\s+ctypes\b',
+                r'\bimport\s+socket\b', r'\bfrom\s+os\b',
+            ]
+            for pattern in dangerous_patterns:
+                if re.search(pattern, tc_code):
+                    execution.status = "FAILED"
+                    execution.finished_at = datetime.now(timezone.utc)
+                    device.status = "CONNECTED"
+                    await session.commit()
+                    logger.warning(
+                        "TC code rejected (dangerous pattern: %s) for execution %s",
+                        pattern, execution_id,
+                    )
+                    if execution.callback_url:
+                        await self._send_callback(
+                            execution, device, [], 0, 0, True,
+                            "SECURITY_VIOLATION", [],
+                        )
+                    return
+
             # Write TC code to temp file
             tc_dir = tempfile.mkdtemp(prefix="tc_exec_")
             tc_file = os.path.join(tc_dir, "test_case.py")
             with open(tc_file, "w", encoding="utf-8") as f:
-                f.write(execution.test_code)
+                f.write(tc_code)
 
             # Build env for subprocess
             env = os.environ.copy()
@@ -185,6 +216,12 @@ class TestRunner:
                     execution, device, steps_data, passed, failed,
                     aborted, abort_reason, crash_detector.crash_logs,
                 )
+
+            # Cleanup temp directory
+            try:
+                shutil.rmtree(tc_dir, ignore_errors=True)
+            except Exception:
+                pass
 
             # Check queue for next execution
             self._active_runs.pop(execution_id, None)
