@@ -20,6 +20,17 @@ def _init_saml_auth(req_data: dict) -> OneLogin_Saml2_Auth:
     return OneLogin_Saml2_Auth(req_data, saml_settings)
 
 
+@router.post("/dev-login")
+async def dev_login():
+    """Dev-mode only: returns a JWT token without any authentication."""
+    from app.core.config import get_settings
+    if not get_settings().DEV_MODE:
+        raise HTTPException(status_code=403, detail="Dev login is disabled in production")
+    from app.core.auth import create_jwt_token, DEV_USER
+    token = create_jwt_token(DEV_USER)
+    return {"access_token": token, "token_type": "bearer"}
+
+
 @router.get("/saml/login")
 async def saml_login(request: Request):
     """Initiate SAML SSO login — redirect to IdP."""

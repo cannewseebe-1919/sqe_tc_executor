@@ -1,33 +1,67 @@
-version: "3.9"
+# ================================================================
+# sqe_tc_executor - docker-compose.yml
+# 실행 전 backend/.env 파일을 작성하세요 (.env.example 참고)
+# ================================================================
+
+x-build-args: &internal-build-args
+  INTERNAL_REGISTRY: ${INTERNAL_REGISTRY:-docker-registry.internal}
+  APT_MIRROR: ${APT_MIRROR:-http://apt-mirror.internal/ubuntu}
+  PIP_INDEX_URL: ${PIP_INDEX_URL:-http://pypi-mirror.internal/simple}
+  PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-pypi-mirror.internal}
 
 services:
+  # ── 백엔드 ─────────────────────────────────────────────────────
   backend:
-    build: ./backend
+    build:
+      context: ./backend
+      args:
+        <<: *internal-build-args
+    image: ${INTERNAL_REGISTRY:-docker-registry.internal}/sqe-tc-executor-backend:latest
     ports:
       - "8001:8000"
+    env_file:
+      - ./backend/.env
     environment:
-      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/test_executor
+      - DATABASE_URL=postgresql+asyncpg://postgres:${DB_PASSWORD:-postgres}@db:5432/test_executor
       - REDIS_URL=redis://redis:6379/0
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_started
-    volumes:
-      - ./backend:/app
-      - screenshots:/app/screenshots
-      - logs:/app/logs
-    # ADB needs access to USB devices
+    # Android USB 디바이스 접근에 필요
     privileged: true
     devices:
       - /dev/bus/usb:/dev/bus/usb
+    volumes:
+      - screenshots:/app/screenshots
+      - logs:/app/logs
+    restart: unless-stopped
 
+  # ── 프론트엔드 (nginx) ─────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        INTERNAL_REGISTRY: ${INTERNAL_REGISTRY:-docker-registry.internal}
+        NPM_REGISTRY: ${NPM_REGISTRY:-http://npm-registry.internal}
+    image: ${INTERNAL_REGISTRY:-docker-registry.internal}/sqe-tc-executor-frontend:latest
+    ports:
+      - "3001:80"
+    environment:
+      - BACKEND_HOST=backend
+      - BACKEND_PORT=8000
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  # ── PostgreSQL ─────────────────────────────────────────────────
   db:
-    image: postgres:16-alpine
+    image: ${INTERNAL_REGISTRY:-docker-registry.internal}/postgres:16-alpine
     environment:
       POSTGRES_DB: test_executor
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
     ports:
       - "5433:5432"
     volumes:
@@ -37,13 +71,17 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+    restart: unless-stopped
 
+  # ── Redis ──────────────────────────────────────────────────────
   redis:
-    image: redis:7-alpine
+    image: ${INTERNAL_REGISTRY:-docker-registry.internal}/redis:7-alpine
     ports:
       - "6380:6379"
     volumes:
       - redisdata:/data
+    command: redis-server --appendonly yes
+    restart: unless-stopped
 
 volumes:
   pgdata:

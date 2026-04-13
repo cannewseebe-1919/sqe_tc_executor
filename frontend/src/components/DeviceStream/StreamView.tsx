@@ -25,8 +25,11 @@ export default function StreamView({ deviceId, deviceName, thumbnail = false, on
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Expect base64-encoded JPEG frame
+    // Expect base64-encoded image frame (JPEG or PNG)
     if (typeof data === 'object' && data !== null && 'frame' in data) {
+      const frameData = (data as { frame: string }).frame;
+      // Auto-detect PNG (base64 of PNG starts with 'iVBOR') or default to JPEG
+      const mime = frameData.startsWith('iVBOR') ? 'image/png' : 'image/jpeg';
       const img = new Image();
       img.onload = () => {
         canvas.width = img.width;
@@ -34,7 +37,7 @@ export default function StreamView({ deviceId, deviceName, thumbnail = false, on
         ctx.drawImage(img, 0, 0);
         frameCount.current++;
       };
-      img.src = `data:image/jpeg;base64,${(data as { frame: string }).frame}`;
+      img.src = `data:${mime};base64,${frameData}`;
     }
   }, []);
 

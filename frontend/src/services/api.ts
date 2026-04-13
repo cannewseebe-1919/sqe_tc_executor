@@ -76,6 +76,11 @@ export async function getSamlLoginUrl(): Promise<string> {
   return data.url;
 }
 
+export async function devLogin(): Promise<string> {
+  const { data } = await api.post<{ access_token: string }>('/auth/dev-login');
+  return data.access_token;
+}
+
 export async function getCurrentUser() {
   const { data } = await api.get('/auth/me');
   return data;

@@ -1,337 +1,435 @@
 # SQE Test Executor
 
-Android 단말 테스트 자동 실행 서버입니다.
-USB로 연결된 Android 디바이스를 관리하고, ADB + Runner App을 통해 테스트 케이스를 실행하며, 실시간 화면 스트리밍과 FIFO 스케줄링을 제공합니다.
+USB로 연결된 실제 Android 단말에서 테스트 케이스를 자동으로 실행하는 서버입니다.
+sqe_tc_bot(TC Generator)에서 AI로 생성한 Python 테스트 코드를 받아 실행하고, 결과를 콜백으로 돌려줍니다.
 
-[TC Generator (sqe_tc_bot)](https://github.com/cannewseebe-1919/sqe_tc_bot)에서 AI로 생성한 테스트 코드를 실제 Android 단말에서 실행하는 역할을 합니다.
+**실행 환경**: Ubuntu 22.04 (ADB USB 접근을 위해 직접 설치 권장)
 
 ---
 
 ## 아키텍처
 
 ```
-[Browser] ←→ [React Frontend :3001] ←→ [FastAPI Backend :8001] ←→ [ADB] ←→ [Android Devices]
-                                              ↕                        ↕
-                                     [PostgreSQL] [Redis]       [Runner App]
-                                              ↕                  (on device)
-                                     [TC Generator :8000]
-                                    (sqe_tc_bot / MCP 서버)
+[sqe_tc_bot]
+    ↓ POST /api/execute
+[FastAPI Backend :8001]
+    ↕                    ↕
+[PostgreSQL] [Redis]    [ADB] ←→ [Android 단말]
+    ↑                              ↕
+콜백 결과 → sqe_tc_bot         [Runner App]
 ```
 
 ---
 
-## 사전 요구사항
+## 0단계: 사내망 환경 사전 설정
 
-- **Python 3.12+**
-- **PostgreSQL 16** (또는 Docker로 실행)
-- **Redis 7** (또는 Docker로 실행)
-- **ADB** (Android Debug Bridge) — Android SDK Platform-Tools
-- **scrcpy** — 실시간 화면 스트리밍용 (선택 사항)
-- **USB로 연결된 Android 디바이스** (USB 디버깅 활성화 필요)
-- **Node.js 18+ & npm** (프론트엔드 실행 시)
-- **Docker & Docker Compose** (DB/Redis를 컨테이너로 실행하는 경우)
+> **인터넷 차단 환경**이므로 아래 값을 사내 담당자에게 확인 후 기입하세요.
+
+```
+INTERNAL_DOCKER_REGISTRY = ______________   # 예: harbor.internal.company
+INTERNAL_APT_MIRROR      = ______________   # 예: http://mirror.internal.company/ubuntu
+INTERNAL_PIP_MIRROR      = ______________   # 예: http://pypi.internal.company/simple
+INTERNAL_PIP_HOST        = ______________   # 예: pypi.internal.company
+INTERNAL_NPM_REGISTRY    = ______________   # 예: http://npm.internal.company
+```
+
+### 호스트 apt 소스 설정 (Ubuntu 22.04)
+
+```bash
+sudo nano /etc/apt/sources.list
+```
+
+아래 내용으로 전체 교체:
+
+```
+deb http://mirror.internal.company/ubuntu jammy main restricted universe multiverse
+deb http://mirror.internal.company/ubuntu jammy-updates main restricted universe multiverse
+deb http://mirror.internal.company/ubuntu jammy-security main restricted universe multiverse
+```
+
+```bash
+sudo apt-get update
+```
+
+### 호스트 pip 설정
+
+```bash
+mkdir -p ~/.config/pip
+cat > ~/.config/pip/pip.conf << 'EOF'
+[global]
+index-url = http://pypi.internal.company/simple
+trusted-host = pypi.internal.company
+EOF
+```
+
+### 호스트 npm 설정 (프론트엔드 빌드 시)
+
+```bash
+npm config set registry http://npm.internal.company
+```
+
+### Docker 데몬에 사내 레지스트리 등록 (Docker Compose로 DB/Redis 실행 시)
+
+```bash
+sudo nano /etc/docker/daemon.json
+```
+
+```json
+{
+  "insecure-registries": ["harbor.internal.company"],
+  "registry-mirrors": ["http://harbor.internal.company"]
+}
+```
+
+```bash
+sudo systemctl restart docker
+```
 
 ---
 
-## 로컬 실행 방법 (권장)
-
-USB 디바이스에 직접 접근해야 하므로 로컬 실행을 권장합니다.
-
-### 1. 저장소 클론
+## 1단계: 시스템 패키지 설치
 
 ```bash
-git clone https://github.com/cannewseebe-1919/sqe_tc_executor.git
+sudo apt-get install -y \
+    python3.12 python3.12-venv python3.12-dev \
+    android-tools-adb \
+    gcc libxml2-dev libxmlsec1-dev libxmlsec1-openssl pkg-config \
+    git
+```
+
+### ADB 설치 확인
+
+```bash
+adb version
+# Android Debug Bridge version 1.0.xx 가 나와야 함
+```
+
+### (선택) scrcpy 설치 — 화면 스트리밍 품질 향상
+
+```bash
+sudo apt-get install -y scrcpy
+```
+
+---
+
+## 2단계: 프로젝트 다운로드
+
+```bash
+# 사내 git 서버에서 클론하는 경우
+git clone http://git.internal.company/sqe/sqe_tc_executor.git
 cd sqe_tc_executor
 ```
 
-### 2. 환경변수 설정
+---
 
-`backend/.env` 파일을 생성합니다.
-
-```env
-# 개발 모드 (DEV_MODE=true이면 SAML SSO 없이 API 사용 가능)
-DEV_MODE=true
-DEBUG=true
-
-# JWT 시크릿 (sqe_tc_bot의 JWT_SECRET과 반드시 동일한 값 사용)
-JWT_SECRET=dev-secret-change-in-production
-
-# DB / Redis
-DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/test_executor
-REDIS_URL=redis://localhost:6379/0
-
-# ADB / scrcpy 경로
-ADB_PATH=adb
-SCRCPY_PATH=scrcpy
-
-# CORS 허용 도메인
-CORS_ORIGINS=["http://localhost:3001","http://localhost:3000"]
-```
-
-> **팁**: 이 저장소의 `backend/.env`에는 `DEV_MODE=true`와 개발용 JWT 시크릿이 예시값으로 포함되어 있습니다.
-> 프로덕션 배포 전 반드시 `DEV_MODE=false`로 변경하고 강력한 `JWT_SECRET`을 사용하세요.
-
-### 3. PostgreSQL & Redis 실행
-
-Docker Compose로 DB와 Redis만 띄우는 방법:
-
-```bash
-docker compose up -d db redis
-```
-
-또는 로컬에 PostgreSQL/Redis가 이미 설치되어 있다면 직접 실행해도 됩니다.
-
-### 4. Python 가상환경 설정 및 의존성 설치
+## 3단계: Python 가상환경 및 의존성 설치
 
 ```bash
 cd backend
 
-# 가상환경 생성 (최초 1회)
-python -m venv venv
+python3.12 -m venv venv
+source venv/bin/activate
 
-# 가상환경 활성화
-venv\Scripts\activate        # Windows
-# source venv/bin/activate   # macOS/Linux
-
-# 의존성 설치
+# pip 미러가 ~/.config/pip/pip.conf에 설정되어 있으면 그냥 실행
 pip install -r requirements.txt
+
+# 또는 미러를 직접 지정
+pip install -r requirements.txt \
+    --index-url http://pypi.internal.company/simple \
+    --trusted-host pypi.internal.company
 ```
-
-> 이 저장소에는 이미 `backend/venv/`가 포함되어 있어 재생성 없이 바로 활성화해서 사용할 수 있습니다.
-
-### 5. DB 마이그레이션
-
-```bash
-# backend/ 디렉토리에서 실행
-PYTHONPATH=. alembic upgrade head
-```
-
-Windows에서 환경변수를 인라인으로 설정하기 어려운 경우:
-
-```bash
-# PowerShell
-$env:PYTHONPATH="."; alembic upgrade head
-
-# Git Bash / MINGW
-PYTHONPATH=. alembic upgrade head
-```
-
-### 6. 서버 실행
-
-```bash
-PYTHONPATH=. uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
-```
-
-서버 기동 확인:
-- API 서버: http://localhost:8001
-- 헬스체크: http://localhost:8001/health
-- Swagger UI: http://localhost:8001/docs
-
-### 7. 프론트엔드 실행 (선택)
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-프론트엔드: http://localhost:3001
 
 ---
 
-## 개발 모드 (DEV_MODE)
-
-사내 SAML SSO 환경이 갖춰지지 않은 상황에서도 API를 바로 사용할 수 있도록 개발 모드를 지원합니다.
-
-### 설정
-
-`backend/.env`에 다음을 추가합니다:
-
-```env
-DEV_MODE=true
-```
-
-### 개발용 JWT 토큰 발급
-
-`DEV_MODE=true` 상태에서 아래 엔드포인트를 호출하면 인증 없이 JWT 토큰을 발급받을 수 있습니다:
+## 4단계: 환경변수 파일 작성
 
 ```bash
-curl -X POST http://localhost:8001/api/auth/dev-login
+cp .env.example .env
+nano .env
 ```
 
-응답 예시:
+**반드시 수정해야 할 항목 (★):**
 
-```json
-{
-  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "token_type": "bearer"
+```env
+# ★ JWT 시크릿 (sqe_tc_bot의 JWT_SECRET과 반드시 동일한 값)
+JWT_SECRET=랜덤하고-강력한-시크릿값
+
+# ★ CORS (sqe_tc_bot 프론트엔드 주소 포함)
+CORS_ORIGINS=["http://tc-bot-서버-IP:3000","http://이-서버-IP:3001"]
+
+# 직접 설치 시 localhost로 변경
+DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/test_executor
+REDIS_URL=redis://localhost:6379/0
+
+# SAML (개발·테스트 시 DEV_MODE=true 사용 가능)
+DEV_MODE=false
+```
+
+> **개발/테스트 환경**: `DEV_MODE=true` 로 설정하면 SAML 없이 바로 사용 가능합니다.
+
+---
+
+## 5단계: PostgreSQL & Redis 실행
+
+### 방법 A — Docker Compose (권장)
+
+루트 `.env` 파일 생성:
+
+```bash
+cat > ../.env << 'EOF'
+INTERNAL_REGISTRY=harbor.internal.company
+APT_MIRROR=http://mirror.internal.company/ubuntu
+PIP_INDEX_URL=http://pypi.internal.company/simple
+PIP_TRUSTED_HOST=pypi.internal.company
+NPM_REGISTRY=http://npm.internal.company
+DB_PASSWORD=변경하세요
+EOF
+```
+
+DB/Redis만 실행:
+
+```bash
+cd ..   # 프로젝트 루트로
+docker compose up -d db redis
+```
+
+### 방법 B — 호스트에 직접 설치
+
+```bash
+# PostgreSQL
+sudo apt-get install -y postgresql-16
+sudo systemctl start postgresql
+sudo -u postgres createdb test_executor
+
+# Redis
+sudo apt-get install -y redis-server
+sudo systemctl start redis-server
+```
+
+---
+
+## 6단계: DB 마이그레이션
+
+```bash
+cd backend
+source venv/bin/activate
+
+PYTHONPATH=. alembic upgrade head
+```
+
+---
+
+## 7단계: 서버 실행
+
+### 직접 실행 (개발/테스트)
+
+```bash
+cd backend
+source venv/bin/activate
+
+PYTHONPATH=. uvicorn app.main:app --host 0.0.0.0 --port 8001
+```
+
+### systemd 서비스로 등록 (운영 환경 권장)
+
+```bash
+sudo nano /etc/systemd/system/sqe-tc-executor.service
+```
+
+```ini
+[Unit]
+Description=SQE TC Executor
+After=network.target postgresql.service redis.service
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/sqe_tc_executor/backend
+Environment=PYTHONPATH=/home/ubuntu/sqe_tc_executor/backend
+ExecStart=/home/ubuntu/sqe_tc_executor/backend/venv/bin/uvicorn \
+    app.main:app --host 0.0.0.0 --port 8001
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+> `User`, `WorkingDirectory`, `ExecStart` 경로를 실제 경로로 변경하세요.
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable sqe-tc-executor
+sudo systemctl start sqe-tc-executor
+
+# 상태 확인
+sudo systemctl status sqe-tc-executor
+```
+
+---
+
+## 8단계: Android 단말 설정
+
+### USB 디버깅 활성화
+
+1. Android 기기: **설정 → 휴대전화 정보 → 빌드번호** 7회 탭
+2. **설정 → 개발자 옵션 → USB 디버깅** 활성화
+3. USB 연결 후 기기의 "USB 디버깅 허용" 승인
+
+### 연결 확인
+
+```bash
+adb devices
+# 예시 출력:
+# List of devices attached
+# R3CR905XXXX    device
+```
+
+### Runner App 빌드 및 설치
+
+> Runner App: UI 트리 탐색, 고품질 스크린샷, 화면 스트리밍을 담당하는 Android 앱
+
+Runner App 빌드는 인터넷 없이 Gradle을 사용해야 합니다.
+
+```bash
+cd runner-app
+
+# Gradle 의존성을 사내 Maven 미러에서 받도록 설정
+# build.gradle의 repositories를 사내 Maven 미러로 변경 후 빌드
+nano build.gradle
+```
+
+`build.gradle` 또는 `settings.gradle`의 `repositories` 블록을 수정:
+
+```groovy
+repositories {
+    maven { url "http://maven.internal.company/repository/android-sdk/" }
+    maven { url "http://maven.internal.company/repository/google/" }
+    maven { url "http://maven.internal.company/repository/central/" }
 }
 ```
 
-이후 API 호출 시 `Authorization: Bearer <token>` 헤더를 포함합니다:
+```bash
+./gradlew assembleDebug
+
+# APK 설치
+adb install app/build/outputs/apk/debug/app-debug.apk
+```
+
+### Runner App 권한 설정 (기기에서 수동)
+
+1. **접근성 서비스**: 설정 → 접근성 → TestRunner → 활성화
+2. **화면 오버레이**: 설정 → 앱 → TestRunner → 다른 앱 위에 표시 허용
+
+---
+
+## 9단계: 동작 확인
 
 ```bash
-curl -H "Authorization: Bearer <token>" http://localhost:8001/api/devices
-```
+# 헬스체크
+curl http://localhost:8001/health
 
-> `DEV_MODE=false` (프로덕션)에서는 `/api/auth/dev-login` 호출 시 `403 Forbidden`이 반환됩니다.
+# 단말 목록 (DEV_MODE=true)
+curl http://localhost:8001/api/devices
+
+# DEV_MODE=false인 경우 토큰 발급 후 사용
+TOKEN=$(curl -s -X POST http://localhost:8001/api/auth/dev-login | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8001/api/devices
+```
 
 ---
 
-## MCP 연동 (sqe_tc_bot)
+## (선택) 프론트엔드 실행
 
-[sqe_tc_bot](https://github.com/cannewseebe-1919/sqe_tc_bot)의 MCP 서버(`backend/mcp_server.py`)가 이 서버의 REST API를 직접 호출합니다.
-AI가 테스트 케이스를 생성하고 → MCP 툴을 통해 이 서버에 실행 요청을 보내는 흐름입니다.
+단말 목록 및 실행 현황을 웹으로 모니터링하려면 실행합니다.
 
-### MCP에서 사용하는 엔드포인트
-
-| MCP 툴 이름 | HTTP 메서드 | 엔드포인트 | 설명 |
-|------------|------------|-----------|------|
-| `list_devices` | GET | `/api/devices` | 연결된 디바이스 목록 조회 |
-| `execute_test` | POST | `/api/execute` | TC 실행 요청 |
-| `get_execution_status` | GET | `/api/execute/{id}/status` | 실행 상태 조회 |
-| `get_execution_result` | GET | `/api/execute/{id}/result` | 실행 결과 조회 |
-
-### DEV_MODE에서의 MCP 연동
-
-`DEV_MODE=true`로 설정하면 sqe_tc_bot의 MCP 서버가 JWT 토큰 없이 이 서버의 API를 호출할 수 있습니다.
-
-sqe_tc_bot 쪽 MCP 설정(`backend/.env`)에서 이 서버의 주소를 지정합니다:
-
-```env
-# sqe_tc_bot의 .env
-EXECUTOR_BASE_URL=http://localhost:8001
-DEV_MODE=true
+```bash
+cd frontend
+npm config set registry http://npm.internal.company
+npm install
+npm run dev
+# 또는 빌드 후 nginx로 서빙
+npm run build
 ```
 
-**중요**: 두 서비스의 `JWT_SECRET` 값은 반드시 동일하게 설정해야 합니다.
+Docker Compose로 프론트엔드까지 실행:
+
+```bash
+# 루트 .env에 INTERNAL_REGISTRY, NPM_REGISTRY 설정 후
+docker compose up -d frontend
+```
+
+프론트엔드: `http://이-서버-IP:3001`
 
 ---
 
-## TestCase SDK 작성 가이드
+## SAML SSO 설정 (운영 환경)
 
-`app/sdk/`에 내장된 SDK를 활용해 테스트 케이스를 작성합니다.
-sqe_tc_bot이 AI로 생성하는 코드도 이 SDK를 사용합니다.
+> DEV_MODE=true 사용 시 이 단계 건너뜀
 
-### 임포트
-
-```python
-from app.sdk import TestCase, device, step, assert_screen, assert_element
+```bash
+nano backend/app/core/saml/settings.json
 ```
 
-### 기본 구조 예시
-
-```python
-from app.sdk import TestCase, device, step, assert_screen
-
-class LoginTest(TestCase):
-    app_package = "com.example.app"
-
-    @step(name="launch_app")
-    def step_01_launch(self):
-        device.launch_app(self.app_package)
-        device.wait(2)
-        assert_screen(text_exists="Login")
-
-    @step(name="verify_login")
-    def step_02_verify(self):
-        device.tap(text="Username")
-        device.input_text("testuser")
-        device.tap(text="Password")
-        device.input_text("password123")
-        device.tap(text="Sign In")
-        assert_screen(text_exists="Welcome")
-
-if __name__ == "__main__":
-    LoginTest().run()
+```json
+{
+  "sp": {
+    "entityId": "http://이-서버-IP:8001/api/auth/saml/metadata",
+    "assertionConsumerService": {
+      "url": "http://이-서버-IP:8001/api/auth/saml/acs",
+      "binding": "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST"
+    },
+    "singleLogoutService": {
+      "url": "http://이-서버-IP:8001/api/auth/saml/slo",
+      "binding": "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect"
+    }
+  },
+  "idp": {
+    "entityId": "http://idp.internal.company/saml/metadata",
+    "singleSignOnService": {
+      "url": "http://idp.internal.company/saml/sso",
+      "binding": "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect"
+    },
+    "singleLogoutService": {
+      "url": "http://idp.internal.company/saml/slo",
+      "binding": "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect"
+    },
+    "x509cert": "사내 IdP의 X509 인증서를 여기에 붙여넣기"
+  }
+}
 ```
 
-### `device` 객체 주요 메서드
+---
 
-| 메서드 | 설명 | 예시 |
+## 서비스 포트
+
+| 서비스 | 포트 | 설명 |
 |--------|------|------|
-| `device.launch_app(package)` | 앱 실행 | `device.launch_app("com.example.app")` |
-| `device.stop_app(package)` | 앱 강제 종료 | `device.stop_app("com.example.app")` |
-| `device.tap(text=, resource_id=, xy=)` | 요소 탭 | `device.tap(text="Login")` |
-| `device.long_tap(text=, duration=)` | 요소 길게 탭 | `device.long_tap(text="Item", duration=1500)` |
-| `device.swipe(start_xy, end_xy, duration=)` | 좌표 기반 스와이프 | `device.swipe((100,500),(100,200))` |
-| `device.swipe_direction(direction)` | 방향 기반 스와이프 | `device.swipe_direction("up")` |
-| `device.input_text(text)` | 텍스트 입력 | `device.input_text("hello")` |
-| `device.press_key(key)` | 키 입력 | `device.press_key("back")` |
-| `device.wait(seconds)` | 대기 | `device.wait(2)` |
-| `device.find_element(text=, resource_id=)` | 요소 탐색 (Runner App) | `device.find_element(text="OK")` |
-| `device.wait_for_element(text=, timeout=)` | 요소 대기 | `device.wait_for_element(text="OK", timeout=10)` |
-| `device.element_exists(text=, resource_id=)` | 요소 존재 여부 확인 | `device.element_exists(text="Error")` |
-| `device.screenshot(name=)` | 스크린샷 저장 | `device.screenshot("step01")` |
-| `device.get_current_activity()` | 현재 Activity 확인 | `device.get_current_activity()` |
-| `device.get_device_info()` | 디바이스 정보 조회 | `device.get_device_info()` |
-
-`press_key` 지원 키 목록: `back`, `home`, `enter`, `menu`, `volume_up`, `volume_down`, `power`, `tab`, `delete`, `recent`
-
-### `assert_screen` 사용법
-
-현재 화면의 상태를 검증합니다. Runner App의 UI 트리를 기반으로 동작합니다.
-
-```python
-from app.sdk import assert_screen
-
-# 텍스트가 화면에 존재하는지 확인
-assert_screen(text_exists="Welcome")
-
-# 텍스트가 화면에 없는지 확인
-assert_screen(text_not_exists="Error")
-
-# resource_id로 요소 존재 여부 확인
-assert_screen(resource_id_exists="com.example.app:id/main_button")
-
-# 여러 조건 동시 검증
-assert_screen(text_exists="Home", text_not_exists="Login")
-```
-
-### `assert_element` 사용법
-
-특정 요소의 속성값을 검증합니다.
-
-```python
-from app.sdk import assert_element
-
-# 특정 요소의 text 속성 검증
-assert_element(resource_id="com.example.app:id/title", attribute="text", expected="홈")
-
-# 요소의 enabled 상태 검증
-assert_element(text="Submit", attribute="enabled", expected="True")
-```
+| 백엔드 API | 8001 | sqe_tc_bot에서 호출 |
+| 프론트엔드 | 3001 | 모니터링 UI (선택) |
+| PostgreSQL | 5433 | DB (Docker Compose 사용 시) |
+| Redis | 6380 | 큐 (Docker Compose 사용 시) |
 
 ---
 
-## API 엔드포인트
+## 운영 명령어
 
-### 인증
+```bash
+# 서비스 상태 확인
+sudo systemctl status sqe-tc-executor
 
-| Method | Endpoint | 설명 |
-|--------|----------|------|
-| GET | `/health` | 헬스체크 |
-| POST | `/api/auth/dev-login` | 개발 모드 JWT 토큰 발급 (`DEV_MODE=true` 전용) |
-| GET | `/api/auth/saml/login` | SAML SSO 로그인 시작 |
-| POST | `/api/auth/saml/acs` | SAML ACS 콜백 처리 |
-| GET | `/api/auth/saml/metadata` | SP 메타데이터 (IdP 등록용) |
+# 서비스 재시작
+sudo systemctl restart sqe-tc-executor
 
-### 디바이스
+# 실시간 로그
+sudo journalctl -u sqe-tc-executor -f
 
-| Method | Endpoint | 설명 |
-|--------|----------|------|
-| GET | `/api/devices` | 연결된 디바이스 목록 |
-| GET | `/api/devices/{serial}` | 디바이스 상세 정보 |
-| WS | `/api/devices/{id}/stream` | 디바이스 실시간 화면 스트리밍 |
+# DB 접속
+psql -h localhost -U postgres -d test_executor
 
-### 실행
-
-| Method | Endpoint | 설명 |
-|--------|----------|------|
-| POST | `/api/execute` | TC 실행 요청 (FIFO 큐 등록) |
-| GET | `/api/execute/{id}/status` | 실행 상태 조회 |
-| GET | `/api/execute/{id}/result` | 실행 결과 조회 |
-| WS | `/api/execute/{id}/stream` | 실행 중 화면 스트리밍 |
+# 연결된 단말 확인
+adb devices
+```
 
 ---
 
@@ -339,162 +437,65 @@ assert_element(text="Submit", attribute="enabled", expected="True")
 
 | 변수명 | 설명 | 기본값 |
 |--------|------|--------|
-| `DEV_MODE` | 개발 모드 (true이면 SAML SSO 없이 API 사용 가능) | `false` |
-| `DEBUG` | 디버그 로그 출력 | `false` |
-| `DATABASE_URL` | PostgreSQL 접속 URL | `postgresql+asyncpg://postgres:postgres@localhost:5432/test_executor` |
-| `REDIS_URL` | Redis 접속 URL | `redis://localhost:6379/0` |
+| `JWT_SECRET` | JWT 서명 키 (tc_bot과 동일) | **필수** |
+| `DATABASE_URL` | PostgreSQL 접속 URL | **필수** |
+| `REDIS_URL` | Redis 접속 URL | **필수** |
+| `DEV_MODE` | `true`: SAML 우회 개발모드 | `false` |
 | `ADB_PATH` | ADB 실행 파일 경로 | `adb` |
-| `ADB_POLL_INTERVAL` | 디바이스 탐지 폴링 간격(초) | `5` |
-| `RUNNER_APP_PORT` | Runner App 통신 포트 | `8080` |
-| `RUNNER_APP_APK_PATH` | Runner App APK 경로 | `runner-app/app/build/outputs/apk/debug/app-debug.apk` |
-| `SCRCPY_PATH` | scrcpy 실행 파일 경로 | `scrcpy` |
-| `JWT_SECRET` | JWT 서명 시크릿 (sqe_tc_bot과 동일 값 사용) | `change-me-in-production` |
-| `JWT_ALGORITHM` | JWT 알고리즘 | `HS256` |
-| `JWT_EXPIRE_MINUTES` | JWT 만료 시간(분) | `60` |
-| `DEFAULT_STEP_TIMEOUT` | TC 스텝 실행 타임아웃(초) | `30` |
-| `SCREENSHOT_DIR` | 스크린샷 저장 디렉토리 | `screenshots` |
-| `LOG_DIR` | 로그 저장 디렉토리 | `logs` |
-| `LOGCAT_POLL_INTERVAL` | 크래시 감지 logcat 폴링(초) | `0.5` |
-| `SAML_SETTINGS_PATH` | SAML 설정 파일 경로 | `app/core/saml/settings.json` |
-| `CORS_ORIGINS` | 허용 CORS 도메인 | `["http://localhost:3000","http://localhost:3001"]` |
+| `ADB_POLL_INTERVAL` | 단말 탐지 폴링 간격(초) | `5` |
+| `RUNNER_APP_PORT` | Runner App HTTP 포트 | `8080` |
+| `RUNNER_APP_APK_PATH` | APK 경로 | `runner-app/.../app-debug.apk` |
+| `DEFAULT_STEP_TIMEOUT` | 스텝 타임아웃(초) | `30` |
+| `SCREENSHOT_DIR` | 스크린샷 저장 경로 | `screenshots` |
+| `LOG_DIR` | 로그 저장 경로 | `logs` |
+| `LOGCAT_POLL_INTERVAL` | 크래시 감지 폴링(초) | `0.5` |
+| `CORS_ORIGINS` | 허용 CORS 도메인 | **필수** |
+| `DEBUG` | 디버그 로그 | `false` |
 
 ---
 
-## 주요 기능
+## 트러블슈팅
 
-### FIFO 스케줄링
-
-Redis 기반 디바이스별 큐를 사용합니다. 동일한 디바이스에 여러 실행 요청이 들어오면 FIFO 순서로 순차 실행됩니다.
-
-### WebSocket 화면 스트리밍
-
-실행 중인 디바이스 화면을 실시간으로 스트리밍합니다:
-- `/api/execute/{id}/stream` — 특정 실행 세션 화면
-- `/api/devices/{id}/stream` — 디바이스 직접 스트리밍
-
-### 자동 크래시 감지
-
-logcat을 실시간으로 모니터링하여 앱 크래시를 자동 감지하고 실행을 중단합니다.
-ADB 연결이 끊어진 경우에도 자동으로 감지합니다.
-
----
-
-## 프로젝트 구조
-
-```
-sqe_tc_executor/
-├── backend/
-│   ├── app/
-│   │   ├── api/           # API 라우터 (auth, devices, execution, streaming)
-│   │   ├── core/          # 설정, 인증, DB, SAML
-│   │   │   └── saml/      # SAML IdP 설정 파일
-│   │   ├── models/        # SQLAlchemy 모델 (Device, Execution, ExecutionStep)
-│   │   ├── schemas/       # Pydantic 스키마
-│   │   ├── sdk/           # TestCase SDK (TestCase, @step, device, assertions)
-│   │   └── services/      # ADB, 디바이스 모니터, 스케줄러, 크래시 감지, 스트리밍
-│   ├── alembic/           # DB 마이그레이션
-│   ├── .env               # 환경변수 (DEV_MODE=true 포함)
-│   ├── Dockerfile
-│   └── requirements.txt
-├── frontend/
-│   ├── src/
-│   │   ├── pages/         # LoginPage, SamlCallbackPage
-│   │   ├── components/    # DeviceList, DeviceStream, QueueStatus, ExecutionHistory
-│   │   └── hooks/         # useWebSocket
-│   └── package.json
-├── runner-app/            # Android Runner App (Java, minSdk 21)
-│   ├── app/
-│   │   └── src/main/java/ # AccessibilityService, ScreenCapture, UITreeParser
-│   ├── build.gradle
-│   └── settings.gradle
-└── docker-compose.yml
-```
-
----
-
-## 디바이스 설정 가이드
-
-### USB 디버깅 활성화
-
-1. Android 기기에서 **설정 → 휴대전화 정보 → 빌드번호** 7회 탭 → 개발자 옵션 활성화
-2. **설정 → 개발자 옵션 → USB 디버깅** 활성화
-3. USB 연결 후 기기에서 "USB 디버깅 허용" 대화상자 승인
-
-디바이스 연결 확인:
-
+### ADB 단말이 인식되지 않음
 ```bash
+adb kill-server
+adb start-server
 adb devices
 ```
+→ USB 케이블 교체 시도, USB 디버깅 재활성화
 
-### Runner App 빌드 및 설치
-
-Runner App은 디바이스에서 UI 트리 탐색, 스크린샷, 화면 스트리밍을 담당합니다.
-
+### permission denied: adb
 ```bash
-cd runner-app
-./gradlew assembleDebug
-adb install app/build/outputs/apk/debug/app-debug.apk
+sudo usermod -aG plugdev $USER
+# 재로그인 필요
 ```
 
-> Runner App 없이도 기본 ADB 명령 기반 테스트는 실행 가능합니다.
-> 단, `device.find_element()`, `assert_screen()` 등 UI 트리 기반 기능은 Runner App이 필요합니다.
-
-### Runner App 권한 설정
-
-Runner App 설치 후 다음 권한을 수동으로 활성화해야 합니다:
-
-1. **접근성 서비스**: 설정 → 접근성 → TestRunner → 활성화 (UI 트리 탐색용)
-2. **화면 오버레이**: 설정 → 앱 → TestRunner → 다른 앱 위에 표시 허용 (스크린샷/스트리밍용)
-
----
-
-## SAML SSO 설정 (프로덕션)
-
-`DEV_MODE=false` 환경에서는 SAML 2.0 SSO 인증이 필요합니다.
-`backend/app/core/saml/settings.json`에서 IdP 정보를 수정합니다:
-
-```json
-{
-  "sp": {
-    "entityId": "https://your-domain.com/api/auth/saml/metadata",
-    "assertionConsumerService": {
-      "url": "https://your-domain.com/api/auth/saml/acs"
-    }
-  },
-  "idp": {
-    "entityId": "https://your-idp.com/saml/metadata",
-    "singleSignOnService": {
-      "url": "https://your-idp.com/saml/sso"
-    },
-    "singleLogoutService": {
-      "url": "https://your-idp.com/saml/slo"
-    },
-    "x509cert": "REPLACE_WITH_IDP_CERTIFICATE"
-  }
-}
-```
-
----
-
-## Docker로 전체 실행
-
+### Runner App 통신 오류
 ```bash
-docker compose up -d
+# adb port forward 확인
+adb forward tcp:8080 tcp:8080
 ```
 
-서비스가 시작됩니다:
-- **Backend API**: http://localhost:8001
-- **PostgreSQL**: localhost:5433
-- **Redis**: localhost:6380
+### DB 마이그레이션 오류
+```bash
+source venv/bin/activate
+PYTHONPATH=. alembic stamp head
+PYTHONPATH=. alembic upgrade head
+```
 
-> **주의**: Docker에서 USB 디바이스에 접근하려면 Linux 호스트 + `privileged` 모드가 필요합니다.
-> Windows/macOS에서는 로컬 실행을 권장합니다.
+### pip 패키지 설치 실패
+→ `~/.config/pip/pip.conf`의 `index-url` 확인
+→ `trusted-host` 설정 여부 확인
+
+### Docker 이미지 pull 실패
+→ `/etc/docker/daemon.json`의 `insecure-registries` 확인
+→ `sudo systemctl restart docker` 후 재시도
 
 ---
 
 ## 연동 서비스
 
-이 프로젝트는 [sqe_tc_bot (TC Generator)](https://github.com/cannewseebe-1919/sqe_tc_bot)와 함께 사용합니다.
-TC Generator에서 AI로 생성한 테스트 코드를 이 서버가 실제 Android 단말에서 실행합니다.
+- **sqe_tc_bot** — TC 코드 생성 및 실행 요청 (이 서버를 호출함)
+- **사내 IdP** — SAML SSO 인증 (운영 시)
 
-**중요**: 두 서비스의 `JWT_SECRET` 값은 반드시 동일하게 설정해야 합니다.
+**중요**: `sqe_tc_bot`의 `JWT_SECRET`과 이 서버의 `JWT_SECRET`은 반드시 동일한 값이어야 합니다.

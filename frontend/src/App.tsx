@@ -1,11 +1,11 @@
-import { BrowserRouter, Routes, Route, Navigate, NavLink } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, NavLink, useParams, useNavigate } from 'react-router-dom';
 import LoginPage from './pages/LoginPage';
 import SamlCallbackPage from './pages/SamlCallbackPage';
-import { DeviceListPage } from './components/DeviceList/DeviceListPage';
-import { StreamPage } from './components/DeviceStream/StreamPage';
-import { QueueStatusPage } from './components/QueueStatus/QueueStatusPage';
-import { ExecutionHistoryPage } from './components/ExecutionHistory/ExecutionHistoryPage';
-import { ExecutionDetail } from './components/ExecutionHistory/ExecutionDetail';
+import DeviceListPage from './components/DeviceList/DeviceListPage';
+import StreamPage from './components/DeviceStream/StreamPage';
+import QueueStatusPage from './components/QueueStatus/QueueStatusPage';
+import ExecutionHistoryPage from './components/ExecutionHistory/ExecutionHistoryPage';
+import ExecutionDetail from './components/ExecutionHistory/ExecutionDetail';
 import './App.css';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -37,6 +37,13 @@ function Layout({ children }: { children: React.ReactNode }) {
   );
 }
 
+function ExecutionDetailRoute() {
+  const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  if (!id) return null;
+  return <ExecutionDetail executionId={id} onBack={() => navigate('/history')} />;
+}
+
 function App() {
   return (
     <BrowserRouter>
@@ -47,7 +54,7 @@ function App() {
         <Route path="/stream" element={<ProtectedRoute><Layout><StreamPage /></Layout></ProtectedRoute>} />
         <Route path="/queue" element={<ProtectedRoute><Layout><QueueStatusPage /></Layout></ProtectedRoute>} />
         <Route path="/history" element={<ProtectedRoute><Layout><ExecutionHistoryPage /></Layout></ProtectedRoute>} />
-        <Route path="/history/:id" element={<ProtectedRoute><Layout><ExecutionDetail /></Layout></ProtectedRoute>} />
+        <Route path="/history/:id" element={<ProtectedRoute><Layout><ExecutionDetailRoute /></Layout></ProtectedRoute>} />
       </Routes>
     </BrowserRouter>
   );

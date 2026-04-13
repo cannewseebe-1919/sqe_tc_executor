@@ -35,10 +35,15 @@ def decode_jwt_token(token: str) -> dict:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
 
 
+DEV_USER = {"sub": "dev", "email": "dev@localhost", "name": "Developer"}
+
+
 async def get_current_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
 ) -> dict:
     """Extract user from JWT Bearer token. Returns user dict or raises 401."""
+    if settings.DEV_MODE:
+        return DEV_USER
     if credentials is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
     return decode_jwt_token(credentials.credentials)

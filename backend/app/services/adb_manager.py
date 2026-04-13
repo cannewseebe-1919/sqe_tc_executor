@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import re
+import subprocess
 from typing import Optional
 
 from app.core.config import get_settings
@@ -23,18 +24,27 @@ class ADBManager:
             cmd.extend(["-s", device_id])
         cmd.extend(args)
         logger.debug("ADB: %s", " ".join(cmd))
-        proc = await asyncio.create_subprocess_exec(
-            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-        )
+
+        loop = asyncio.get_event_loop()
+
+        def _run_sync():
+            result = subprocess.run(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=timeout,
+            )
+            return result
+
         try:
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-        except asyncio.TimeoutError:
-            proc.kill()
+            result = await loop.run_in_executor(None, _run_sync)
+        except subprocess.TimeoutExpired:
             raise TimeoutError(f"ADB command timed out: {' '.join(cmd)}")
-        output = stdout.decode("utf-8", errors="replace").strip()
-        if proc.returncode != 0:
-            err = stderr.decode("utf-8", errors="replace").strip()
-            logger.warning("ADB error (rc=%d): %s", proc.returncode, err)
+
+        output = result.stdout.decode("utf-8", errors="replace").strip()
+        if result.returncode != 0:
+            err = result.stderr.decode("utf-8", errors="replace").strip()
+            logger.warning("ADB error (rc=%d): %s", result.returncode, err)
         return output
 
     async def shell(self, device_id: str, command: str, timeout: float = 30) -> str:

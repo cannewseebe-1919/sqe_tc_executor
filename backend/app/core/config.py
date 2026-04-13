@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     # App
     APP_NAME: str = "Test Executor"
     DEBUG: bool = False
+    DEV_MODE: bool = False
     HOST: str = "0.0.0.0"
     PORT: int = 8000
 
