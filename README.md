@@ -423,7 +423,8 @@ nano backend/app/core/saml/settings.json
 
 1. Android 기기: **설정 → 휴대전화 정보 → 빌드번호** 7회 탭
 2. **설정 → 개발자 옵션 → USB 디버깅** 활성화
-3. USB 연결 후 기기의 "USB 디버깅 허용" 대화상자 승인
+3. USB 케이블로 서버에 연결
+4. 기기 화면에 "USB 디버깅 허용" 대화상자가 뜨면 **허용** 탭
 
 연결 확인:
 
@@ -432,31 +433,114 @@ adb devices
 # 예시:
 # List of devices attached
 # R3CR905XXXX    device
+#
+# "unauthorized" 가 나오면 기기 화면에서 허용 대화상자를 확인하세요.
+# "offline" 이 나오면 케이블 재연결 후 adb kill-server && adb start-server 실행
 ```
 
-### Runner App 설치
+---
+
+### Runner App 최초 설치 및 시작 (1회)
 
 Runner App은 UI 트리 탐색, 고품질 스크린샷, 화면 스트리밍을 담당하는 Android 앱입니다.
 
-사내망에서 Gradle 빌드가 불가하므로 미리 빌드된 APK를 사용합니다.
+**1. APK 설치**
 
 ```bash
 # 프로젝트 루트에서 실행
 adb install runner-app/prebuilt/app-debug.apk
+# Success 메시지가 나와야 합니다.
+# 이미 설치된 경우: adb install -r runner-app/prebuilt/app-debug.apk
 ```
 
-> APK를 새로 빌드해야 할 경우 외부망 PC에서 아래 명령어를 실행한 뒤
+**2. 접근성 서비스 활성화** (기기에서 수동)
+
+기기 화면에서 직접 조작합니다:
+
+1. **설정 → 접근성** 메뉴 진입
+2. 목록에서 **TestRunner** (또는 "Test Platform Runner") 선택
+3. 스위치를 **켬** 으로 토글 → "허용" 확인
+4. 설정 화면에서 나옵니다.
+
+또는 서버에서 adb로 접근성 설정 화면을 바로 열 수 있습니다:
+
+```bash
+adb shell am start -a android.settings.ACCESSIBILITY_SETTINGS
+```
+
+**3. 화면 오버레이 권한 허용** (기기에서 수동)
+
+```bash
+# adb로 권한 설정 화면 바로 열기
+adb shell am start -a android.settings.action.MANAGE_OVERLAY_PERMISSION \
+  -d package:com.testplatform.runner
+```
+
+기기에서 **"다른 앱 위에 표시 허용"** 을 켭니다.
+
+**4. Runner App 실행 및 서버 연결**
+
+기기에서 **TestRunner 앱 아이콘**을 탭하여 실행합니다:
+
+1. 앱 상단에 **"Accessibility: ENABLED"** (초록색) 가 표시되는지 확인
+   - 빨간색이면 2단계로 돌아가서 접근성 서비스를 다시 활성화합니다.
+2. **Server URL** 입력란에 executor 백엔드 WebSocket 주소 입력:
+   ```
+   ws://이-서버-IP:8001/ws/runner
+   ```
+3. **Connect** 버튼 탭
+4. 기기 화면에 **"화면 캡처 시작"** 권한 대화상자 출현 → **"지금 시작"** 탭
+5. 앱 상태가 **"Connected"** (초록색) 로 바뀌면 완료
+
+---
+
+### 재부팅 후 Runner App 재시작
+
+> 커널 패닉, 배터리 방전, fastboot 진입 후 reboot 등 기기가 재부팅된 경우
+
+**접근성 서비스는 재부팅 후 자동으로 복구**됩니다. 별도 설정 불필요.
+
+**화면 캡처 권한(MediaProjection)은 Android 보안 정책에 의해 재부팅 시 초기화**되므로, 아래 절차로 재시작해야 합니다.
+
+```bash
+# 1. USB 재연결 후 기기 인식 확인
+adb devices
+# R3CR905XXXX    device  ← 이 상태여야 함
+```
+
+기기에서:
+1. **TestRunner 앱** 실행
+2. Server URL이 이전에 입력한 값으로 자동 채워져 있는지 확인 (저장됨)
+3. **Connect** 버튼 탭
+4. **"화면 캡처 시작"** 대화상자 → **"지금 시작"** 탭
+5. **"Connected"** 확인 → 완료
+
+> **자동화 불가 사유**: MediaProjection(화면 캡처) 권한은 Android OS가 매 세션마다 사용자 동의를 강제합니다. adb 명령이나 코드로 우회할 수 없는 보안 제약입니다. 접속 자체(Connect 탭)는 수동 1회 필수입니다.
+
+**fastboot 모드에서 복구하는 경우:**
+
+```bash
+# fastboot 모드에서 정상 부팅
+fastboot reboot
+
+# 부팅 완료 확인 (30~60초 대기)
+adb wait-for-device && adb devices
+
+# 앱 실행 화면을 띄워두면 빠르게 Connect 가능
+adb shell am start -n com.testplatform.runner/.MainActivity
+```
+
+이후 기기 화면에서 **Connect → "지금 시작"** 탭합니다.
+
+---
+
+> **APK를 새로 빌드해야 할 경우** 외부망 PC에서 아래 명령어를 실행한 뒤
 > `runner-app/prebuilt/app-debug.apk`를 교체하고 다시 커밋하세요.
 > ```bash
 > cd runner-app
 > ANDROID_HOME=<Android SDK 경로> bash gradlew assembleDebug
 > cp app/build/outputs/apk/debug/app-debug.apk prebuilt/app-debug.apk
 > ```
-
-### Runner App 권한 설정 (기기에서 수동)
-
-1. **접근성 서비스**: 설정 → 접근성 → TestRunner → 활성화
-2. **화면 오버레이**: 설정 → 앱 → TestRunner → 다른 앱 위에 표시 허용
 
 ---
 
