@@ -36,6 +36,7 @@ services:
     volumes:
       - screenshots:/app/screenshots
       - logs:/app/logs
+      - ./runner-app/prebuilt:/app/runner-app/prebuilt:ro
     restart: unless-stopped
 
   # ── 프론트엔드 (nginx) ─────────────────────────────────────────

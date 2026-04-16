@@ -4,12 +4,12 @@ plugins {
 
 android {
     namespace 'com.testplatform.runner'
-    compileSdk 34
+    compileSdk 33
 
     defaultConfig {
         applicationId "com.testplatform.runner"
         minSdk 21
-        targetSdk 34
+        targetSdk 33
         versionCode 1
         versionName "1.0.0"
     }

@@ -25,7 +25,7 @@ class Settings(BaseSettings):
 
     # Runner App
     RUNNER_APP_PORT: int = 8080
-    RUNNER_APP_APK_PATH: str = "runner-app/app/build/outputs/apk/debug/app-debug.apk"
+    RUNNER_APP_APK_PATH: str = "runner-app/prebuilt/app-debug.apk"
 
     # Scrcpy
     SCRCPY_PATH: str = "scrcpy"
