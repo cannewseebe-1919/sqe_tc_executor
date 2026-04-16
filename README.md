@@ -265,7 +265,7 @@ JWT_EXPIRE_MINUTES=60
 ADB_PATH=adb
 ADB_POLL_INTERVAL=5
 RUNNER_APP_PORT=8080
-RUNNER_APP_APK_PATH=runner-app/app/build/outputs/apk/debug/app-debug.apk
+RUNNER_APP_APK_PATH=runner-app/prebuilt/app-debug.apk
 SCRCPY_PATH=scrcpy
 
 # ─── 실행 설정 ───────────────────────────────────────────────────
@@ -434,29 +434,24 @@ adb devices
 # R3CR905XXXX    device
 ```
 
-### Runner App 빌드 및 설치
+### Runner App 설치
 
 Runner App은 UI 트리 탐색, 고품질 스크린샷, 화면 스트리밍을 담당하는 Android 앱입니다.
 
-```bash
-cd runner-app
-nano build.gradle  # 또는 settings.gradle
-```
-
-`repositories` 블록을 사내 Maven 미러로 변경합니다:
-
-```groovy
-repositories {
-    maven { url "http://maven.company.internal/repository/android-sdk/" }
-    maven { url "http://maven.company.internal/repository/google/" }
-    maven { url "http://maven.company.internal/repository/central/" }
-}
-```
+사내망에서 Gradle 빌드가 불가하므로 미리 빌드된 APK를 사용합니다.
 
 ```bash
-./gradlew assembleDebug
-adb install app/build/outputs/apk/debug/app-debug.apk
+# 프로젝트 루트에서 실행
+adb install runner-app/prebuilt/app-debug.apk
 ```
+
+> APK를 새로 빌드해야 할 경우 외부망 PC에서 아래 명령어를 실행한 뒤
+> `runner-app/prebuilt/app-debug.apk`를 교체하고 다시 커밋하세요.
+> ```bash
+> cd runner-app
+> ANDROID_HOME=<Android SDK 경로> bash gradlew assembleDebug
+> cp app/build/outputs/apk/debug/app-debug.apk prebuilt/app-debug.apk
+> ```
 
 ### Runner App 권한 설정 (기기에서 수동)
 
