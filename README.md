@@ -9,15 +9,198 @@ sqe_tc_bot(TC Generator)에서 AI로 생성한 Python 테스트 코드를 받아
 
 ## 아키텍처
 
+### 구성 요소 한눈에 보기
+
 ```
-[sqe_tc_bot]
-    ↓ POST /api/execute
-[FastAPI Backend :8001]  ← 호스트에 직접 설치
-    ↕                    ↕
-[PostgreSQL] [Redis]    [ADB] ←→ [Android 단말]
-(Docker)  (Docker)               ↕
-    ↑                         [Runner App]
-콜백 결과 → sqe_tc_bot
+┌─────────────────────────────────────────────────────────────────┐
+│  sqe_tc_bot  (TC 생성 서버)                                      │
+│  - AI가 테스트 코드(Python)를 생성                               │
+│  - POST /api/execute 로 실행 요청                                │
+│  - 테스트 완료 시 콜백으로 결과 수신                              │
+└───────────────────┬─────────────────────────────────────────────┘
+                    │  HTTP API (포트 8001)
+                    ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  FastAPI 백엔드  (이 서버, 호스트 직접 실행)                      │
+│                                                                  │
+│  ┌─────────────┐  ┌──────────────┐  ┌───────────────────────┐  │
+│  │ DeviceMonitor│  │  Scheduler   │  │     TestRunner        │  │
+│  │ (5초마다    │  │  (Redis 큐)  │  │  (TC 스크립트 실행)   │  │
+│  │  adb devices│  │  단말별 FIFO │  │  Python 서브프로세스  │  │
+│  │  폴링)      │  │              │  │                       │  │
+│  └──────┬──────┘  └──────┬───────┘  └──────────┬────────────┘  │
+│         │                │                      │               │
+└─────────┼────────────────┼──────────────────────┼───────────────┘
+          │                │                      │
+          ▼                ▼                      ▼
+┌─────────────────┐  ┌──────────┐   ┌────────────────────────────┐
+│   PostgreSQL    │  │  Redis   │   │  ADB (USB 통신 도구)        │
+│  - 단말 목록   │  │  - 실행  │   │  - 단말 탐지 / 상태 확인   │
+│  - 실행 이력   │  │    대기열 │   │  - 탭/스와이프 명령 전송   │
+│  - 스텝 결과   │  │          │   │  - 포트 포워딩 설정        │
+│  (Docker)      │  │ (Docker) │   └─────────────┬──────────────┘
+└─────────────────┘  └──────────┘                 │ USB 케이블
+                                                   ▼
+                                    ┌──────────────────────────┐
+                                    │  Android 단말            │
+                                    │  ┌─────────────────────┐ │
+                                    │  │   Runner App        │ │
+                                    │  │  - 접근성 서비스    │ │
+                                    │  │    (UI 트리 탐색)   │ │
+                                    │  │  - 화면 캡처 서비스 │ │
+                                    │  │  - WebSocket 통신   │ │
+                                    │  └─────────────────────┘ │
+                                    └──────────────────────────┘
+```
+
+---
+
+### 요청부터 결과까지 — 전체 흐름
+
+아래는 sqe_tc_bot에서 테스트를 요청했을 때 내부적으로 무슨 일이 일어나는지를 순서대로 설명합니다.
+
+---
+
+#### ① 단말 자동 등록 (항상 백그라운드에서 동작)
+
+서버가 켜져 있는 동안 **DeviceMonitor**가 5초마다 `adb devices` 명령을 실행합니다.  
+USB로 연결된 단말이 감지되면 자동으로 DB에 등록하고, 뽑히면 OFFLINE으로 표시합니다.  
+사람이 별도로 단말을 등록할 필요가 없습니다.
+
+```
+[서버 시작]
+    → DeviceMonitor 백그라운드 동작 시작
+    → 5초마다: adb devices 실행
+    → 새 단말 감지 시: 모델명·Android버전·해상도 조회 → DB 저장
+    → 기존 단말 뽑힘 감지 시: DB 상태 → OFFLINE 변경
+```
+
+---
+
+#### ② 테스트 실행 요청 (sqe_tc_bot → 백엔드)
+
+sqe_tc_bot이 AI로 테스트 코드를 생성한 뒤, 아래와 같은 형태로 백엔드에 요청을 보냅니다.
+
+```
+POST /api/execute
+{
+  "device_id": "R3CR905XXXX",      ← 실행할 단말 ID
+  "test_code": "from device import...",  ← AI가 생성한 Python 테스트 코드
+  "callback_url": "http://bot-server/callback",  ← 완료 후 결과 받을 주소
+  "requested_by": "user@company.com"
+}
+```
+
+백엔드는 요청을 받으면 즉시 응답합니다:
+- 단말이 **비어 있으면** → 바로 실행 시작, `{"status": "RUNNING"}` 반환
+- 단말이 **이미 테스트 중이면** → Redis 큐에 대기 등록, `{"status": "QUEUED", "queue_position": 2}` 반환
+
+같은 단말에 여러 요청이 동시에 와도 순서대로(FIFO) 처리됩니다.
+
+---
+
+#### ③ TC 스크립트 실행 (백엔드 → 단말)
+
+TestRunner가 실제로 테스트를 실행합니다. 내부 동작:
+
+```
+[TestRunner]
+    1. TC 스크립트를 임시 파일로 저장
+    2. 보안 검사: os.system, subprocess, eval 등 위험 코드 차단
+    3. Python 서브프로세스로 TC 스크립트 실행 (최대 10분)
+    4. 동시에 CrashDetector 가동 → 단말 logcat 모니터링 (앱 크래시 감지)
+```
+
+TC 스크립트(AI 생성 코드) 내부에서는 SDK 함수를 호출합니다:
+
+```python
+# TC 스크립트 예시
+device.tap(540, 1200)            # → adb shell input tap 540 1200
+device.get_ui_tree()             # → Runner App에 HTTP 요청 → 접근성 서비스
+device.screenshot()              # → Runner App에 HTTP 요청 → 화면 캡처 서비스
+device.assert_element("로그인")  # → 화면에 해당 텍스트가 있는지 확인
+```
+
+---
+
+#### ④ ADB ↔ Runner App 통신
+
+단말과의 통신은 **두 가지 경로**로 이루어집니다.
+
+| 작업 | 경로 | 설명 |
+|------|------|------|
+| 탭, 스와이프, 텍스트 입력 | **ADB 직접** | `adb shell input tap x y` |
+| 앱 설치 / 실행 | **ADB 직접** | `adb install`, `adb shell am start` |
+| UI 트리 조회 | **Runner App** | 접근성 서비스를 통해 화면 구조 JSON 반환 |
+| 스크린샷 | **Runner App** | 화면 캡처 서비스로 PNG 반환 |
+
+Runner App과의 통신은 ADB 포트 포워딩을 이용합니다:
+
+```
+[백엔드] → HTTP 요청 (localhost:18080/ui-tree)
+              ↓ adb forward tcp:18080 tcp:8080
+          [단말 내 Runner App HTTP 서버 :8080]
+              ↓
+          [접근성 서비스] → 현재 화면의 UI 요소 트리 반환
+```
+
+---
+
+#### ⑤ 화면 실시간 스트리밍 (선택)
+
+테스트가 실행되는 동안 프론트엔드(모니터링 UI)에서 단말 화면을 실시간으로 볼 수 있습니다.
+
+```
+[브라우저]
+    → WebSocket 연결: ws://서버:8001/api/execute/{id}/stream
+    → 백엔드가 Runner App에서 PNG 프레임을 받아 브라우저로 중계
+    → 약 10 FPS로 단말 화면이 실시간 표시
+```
+
+---
+
+#### ⑥ 결과 반환 (백엔드 → sqe_tc_bot)
+
+테스트가 끝나면 백엔드가 콜백 URL로 결과를 전송합니다.
+
+```
+POST {callback_url}
+{
+  "execution_id": "...",
+  "status": "COMPLETED",           ← COMPLETED / FAILED / ABORTED
+  "total_duration_sec": 42.3,
+  "summary": {
+    "total_steps": 10,
+    "passed": 9,
+    "failed": 1
+  },
+  "steps": [
+    { "name": "로그인 버튼 탭", "status": "PASSED", "duration_sec": 1.2 },
+    { "name": "메인화면 진입 확인", "status": "FAILED", "error_type": "AssertionError" }
+  ],
+  "crash_logs": [],                ← 앱 크래시 발생 시 logcat 로그
+  "device_info": { "model": "Galaxy S23", ... }
+}
+```
+
+ABORTED가 되는 경우:
+- 앱 크래시 감지 (CrashDetector)
+- 10분 타임아웃 초과
+- 보안 위반 코드 감지
+
+---
+
+#### 전체 타임라인 요약
+
+```
+0s      bot → POST /api/execute
+0.1s    백엔드 → 실행 ID 발급, 즉시 응답
+0.1s    TC 스크립트 보안 검사 통과
+0.2s    Python 서브프로세스 시작 (TC 코드 실행)
+        CrashDetector 가동 (logcat 모니터링)
+~Ns     각 스텝: adb 명령 / Runner App HTTP 통신
+        스텝 결과 stdout으로 출력 → DB 저장
+완료    bot의 callback_url로 결과 POST
 ```
 
 ---
