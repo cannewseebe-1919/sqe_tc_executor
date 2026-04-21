@@ -881,4 +881,71 @@ PYTHONPATH=. alembic upgrade head
 - **sqe_tc_bot** — TC 코드 생성 및 실행 요청 (이 서버를 호출함)
 - **사내 IdP** — SAML SSO 인증 (운영 시)
 
+---
+
+## 버전 히스토리
+
+### v1.2 — 2026-04-21
+
+#### 주요 변경 사항
+
+**Runner App ↔ 백엔드 통신 방식 전면 개편**
+
+기존에는 Runner App이 자체 HTTP 서버를 열고 백엔드가 ADB 포트 포워딩(`adb forward`)으로 접속하는 구조였습니다.  
+v1.2부터는 Runner App이 WebSocket 클라이언트로 동작하여 백엔드의 `/ws/runner` 엔드포인트에 먼저 연결합니다.  
+이로써 ADB 포트 포워딩이 필요 없어지고, USB 연결 즉시 단말이 자동으로 백엔드에 등록됩니다.
+
+```
+이전: 백엔드 --[adb forward tcp:9090]--> Runner App HTTP 서버
+이후: Runner App --[WebSocket ws://localhost:8001/ws/runner]--> 백엔드
+```
+
+**adb reverse 자동 설정**
+
+사내 Wi-Fi 환경에서 단말이 서버 IP로 직접 접근할 수 없는 경우를 위해,  
+단말 연결(또는 재연결) 시 백엔드가 자동으로 `adb reverse tcp:8001 tcp:8001`을 실행합니다.  
+이를 통해 Runner App은 `ws://localhost:8001/ws/runner`로 연결하면 됩니다.
+
+#### 상세 변경 내역
+
+| 분류 | 항목 | 설명 |
+|------|------|------|
+| **백엔드 신규** | `GET /api/executions` | 실행 이력 목록 조회 (device_id·status·limit·offset 필터 지원) |
+| **백엔드 신규** | `GET /api/queues` | 장치별 현재 실행 중·대기 중 목록 조회 |
+| **백엔드 신규** | `GET /api/auth/me` | JWT에서 사용자 정보(email·name·department) 반환 |
+| **백엔드 신규** | `POST /api/auth/logout` | 로그아웃 처리 (stateless JWT, 200 OK 반환) |
+| **백엔드 신규** | `GET /ws/runner` | Runner App WebSocket 연결 수신 엔드포인트 |
+| **백엔드 신규** | `runner_registry.py` | WebSocket 연결 레지스트리 — android_id 기반 request/response 매칭 |
+| **백엔드 수정** | `runner_app_client.py` | HTTP → WebSocket 명령 방식으로 전면 재작성 |
+| **백엔드 수정** | `GET /api/execute/{id}/status` | 응답에 steps·summary·device_info·crash_logs 포함하도록 확장 |
+| **백엔드 수정** | `GET /api/execute/{id}/result` | QUEUED/RUNNING 상태에서 400 에러 제거 → 현재 상태 그대로 반환 |
+| **백엔드 수정** | `DeviceOut` 스키마 | `connected_at`, `last_seen_at` 필드 추가 |
+| **백엔드 수정** | `StepResultOut` 스키마 | `name` → `step_name`, `step_order`·`execution_id` 필드 추가 |
+| **백엔드 수정** | `device_monitor.py` | 단말 재연결 시 adb reverse 재설정 + 대기 큐 자동 처리 |
+| **백엔드 수정** | `crash_detector.py` | logcat에 `-T 1` 추가 — 연결 이전 로그로 인한 오탐 방지 |
+| **백엔드 수정** | `screen_streamer.py` | ADB 폴백 후 30초마다 Runner App 재연결 자동 시도 |
+| **Runner App** | `ServerCommunicator.java` | `android_id` 기반 `device_id` 포함하여 device_info 메시지 전송 |
+| **Runner App** | `prebuilt/app-debug.apk` | 위 변경 사항 반영하여 재빌드 |
+| **README** | APK 빌드 가이드 추가 | 사내 Gradle 접근 가능 환경에서 직접 빌드하는 방법 |
+| **README** | adb 명령어 `-s` 옵션 추가 | 다중 단말 환경에서 장치 지정 누락 수정 |
+
+#### 마이그레이션 안내
+
+Runner App 설정에서 서버 URL을 다음과 같이 변경해야 합니다:
+
+| | 이전 (v1.1) | v1.2 |
+|-|------------|------|
+| Runner App 서버 URL | `ws://서버IP:8001/ws/runner` | `ws://localhost:8001/ws/runner` |
+| ADB 설정 | `adb forward tcp:9090 tcp:9090` 수동 필요 | 백엔드 자동 설정 (`adb reverse`) |
+
+> **참고**: `adb reverse`는 USB 연결 시 백엔드가 자동으로 실행합니다. 별도 수동 설정 불필요.
+
+---
+
+### v1.1 — 이전 버전
+
+- Runner App HTTP 서버 + ADB 포트 포워딩 방식
+- 기본 실행·스케줄링·크래시 감지 기능
+- 사전 빌드 APK 배포 (`runner-app/prebuilt/app-debug.apk`)
+
 **중요**: `sqe_tc_bot`의 `JWT_SECRET`과 이 서버의 `JWT_SECRET`은 반드시 동일한 값이어야 합니다.
