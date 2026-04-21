@@ -16,6 +16,16 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 
+async def _setup_adb_reverse(serial: str):
+    """Set up adb reverse so the Runner App can reach the backend via USB."""
+    port = settings.BACKEND_EXTERNAL_PORT
+    try:
+        await adb_manager.run("reverse", f"tcp:{port}", f"tcp:{port}", device_id=serial)
+        logger.info("adb reverse tcp:%d set up for %s", port, serial)
+    except Exception:
+        logger.warning("Failed to set up adb reverse for %s", serial)
+
+
 class DeviceMonitor:
     """Polls `adb devices` periodically and syncs DB state."""
 
@@ -50,6 +60,9 @@ class DeviceMonitor:
         adb_devices = await adb_manager.list_devices()
         connected_serials = {d["serial"] for d in adb_devices if d["status"] == "device"}
 
+        # Collect serials that just came back online (need queue processing after commit)
+        reconnected: list[str] = []
+
         async with async_session() as session:
             result = await session.execute(select(Device))
             db_devices = {d.id: d for d in result.scalars().all()}
@@ -63,6 +76,8 @@ class DeviceMonitor:
                 if serial in connected_serials:
                     if device.status == "OFFLINE":
                         device.status = "CONNECTED"
+                        reconnected.append(serial)
+                        logger.info("Device %s reconnected", serial)
                     device.last_seen_at = datetime.now(timezone.utc)
                 else:
                     if device.status not in ("OFFLINE", "ERROR"):
@@ -70,6 +85,21 @@ class DeviceMonitor:
                         logger.warning("Device %s went OFFLINE", serial)
 
             await session.commit()
+
+        # After commit: set up adb reverse and process queued executions for reconnected devices
+        for serial in reconnected:
+            await _setup_adb_reverse(serial)
+            await self._process_queued(serial)
+
+    async def _process_queued(self, device_id: str):
+        """Start the next queued execution for a device that just came back online."""
+        from app.services.scheduler import scheduler
+        from app.services.test_runner import test_runner
+
+        next_id = await scheduler.dequeue(device_id)
+        if next_id:
+            logger.info("Processing queued execution %s for device %s", next_id, device_id)
+            asyncio.create_task(test_runner.execute(next_id))
 
     async def _register_device(self, session: AsyncSession, serial: str):
         logger.info("New device detected: %s", serial)
@@ -86,6 +116,7 @@ class DeviceMonitor:
         )
         session.add(device)
         logger.info("Registered device: %s (%s)", serial, model)
+        await _setup_adb_reverse(serial)
 
 
 device_monitor = DeviceMonitor()

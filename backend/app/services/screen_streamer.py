@@ -12,8 +12,9 @@ from app.core.config import get_settings
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
-STREAM_INTERVAL = 0.1  # ~10 FPS
-RUNNER_APP_FAIL_THRESHOLD = 3  # switch to ADB after this many consecutive Runner App failures
+STREAM_INTERVAL = 0.1           # ~10 FPS
+RUNNER_APP_FAIL_THRESHOLD = 3   # switch to ADB after this many consecutive Runner App failures
+RUNNER_APP_RETRY_AFTER = 30.0   # seconds before retrying Runner App after ADB fallback
 
 
 class DeviceStream:
@@ -24,6 +25,7 @@ class DeviceStream:
         self._subscribers: Set[WebSocket] = set()
         self._task: asyncio.Task | None = None
         self._runner_fail_count = 0
+        self._runner_last_retry: float = 0.0
 
     def add(self, ws: WebSocket):
         self._subscribers.add(ws)
@@ -59,6 +61,16 @@ class DeviceStream:
         return data
 
     async def _take_screenshot(self) -> bytes:
+        loop = asyncio.get_event_loop()
+        now = loop.time()
+
+        # Periodically retry Runner App after it failed and we fell back to ADB
+        if self._runner_fail_count >= RUNNER_APP_FAIL_THRESHOLD:
+            if now - self._runner_last_retry >= RUNNER_APP_RETRY_AFTER:
+                logger.debug("Retrying Runner App for %s after %.0fs", self.device_id, RUNNER_APP_RETRY_AFTER)
+                self._runner_fail_count = 0
+                self._runner_last_retry = now
+
         if self._runner_fail_count < RUNNER_APP_FAIL_THRESHOLD:
             try:
                 result = await self._take_screenshot_runner()
@@ -68,6 +80,9 @@ class DeviceStream:
                 self._runner_fail_count += 1
                 logger.debug("Runner App unavailable for %s (%d/%d), using ADB",
                              self.device_id, self._runner_fail_count, RUNNER_APP_FAIL_THRESHOLD)
+                if self._runner_fail_count >= RUNNER_APP_FAIL_THRESHOLD:
+                    self._runner_last_retry = loop.time()
+
         return await self._take_screenshot_adb()
 
     async def _broadcast(self, payload: dict):
@@ -112,7 +127,6 @@ class ScreenStreamer:
         stream = self._get_stream(device_id)
         stream.add(ws)
         try:
-            # Keep the WebSocket alive until client disconnects
             while True:
                 try:
                     await asyncio.wait_for(ws.receive_text(), timeout=30)

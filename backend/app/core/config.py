@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     # Runner App
     RUNNER_APP_PORT: int = 8080
     RUNNER_APP_APK_PATH: str = "runner-app/prebuilt/app-debug.apk"
+    # Port exposed to the outside (Docker: 8001, direct: same as PORT)
+    # Used for adb reverse so the Runner App can reach the backend via USB
+    BACKEND_EXTERNAL_PORT: int = 8001
 
     # Scrcpy
     SCRCPY_PATH: str = "scrcpy"

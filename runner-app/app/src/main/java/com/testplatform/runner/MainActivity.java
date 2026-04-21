@@ -60,7 +60,7 @@ public class MainActivity extends AppCompatActivity {
             etServerUrl.setText(savedUrl);
         }
 
-        serverCommunicator = new ServerCommunicator();
+        serverCommunicator = new ServerCommunicator(this);
         serverCommunicator.setConnectionListener(new ServerCommunicator.ConnectionListener() {
             @Override
             public void onConnected() {

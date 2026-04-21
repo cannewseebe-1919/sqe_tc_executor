@@ -235,14 +235,16 @@ class TestRunner:
     ):
         steps = [
             StepResultOut(
-                name=sd.get("name", ""),
+                execution_id=execution.id,
+                step_name=sd.get("name", ""),
+                step_order=sd.get("step_order", i + 1),
                 status=sd.get("status", "PASSED"),
                 duration_sec=sd.get("duration_sec", 0),
                 screenshot_url=sd.get("screenshot_path"),
                 log=sd.get("log", ""),
                 error_type=sd.get("error_type"),
             )
-            for sd in steps_data
+            for i, sd in enumerate(steps_data)
         ]
         result = ExecutionResultCallback(
             execution_id=execution.id,

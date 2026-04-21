@@ -14,6 +14,8 @@ class DeviceOut(BaseModel):
     android_version: str
     resolution: str
     queue_length: int = 0
+    connected_at: Optional[datetime] = None
+    last_seen_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
 

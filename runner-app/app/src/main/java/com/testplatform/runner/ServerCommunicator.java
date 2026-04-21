@@ -1,6 +1,8 @@
 package com.testplatform.runner;
 
+import android.content.Context;
 import android.os.Build;
+import android.provider.Settings;
 import android.util.Base64;
 import android.util.Log;
 
@@ -28,6 +30,7 @@ public class ServerCommunicator {
     private static final long RECONNECT_DELAY_MS = 5000;
 
     private final OkHttpClient client;
+    private final Context context;
     private WebSocket webSocket;
     private String serverUrl;
     private boolean shouldReconnect = false;
@@ -40,7 +43,8 @@ public class ServerCommunicator {
         void onLog(String message);
     }
 
-    public ServerCommunicator() {
+    public ServerCommunicator(Context context) {
+        this.context = context.getApplicationContext();
         client = new OkHttpClient.Builder()
                 .readTimeout(0, TimeUnit.MILLISECONDS)   // No read timeout for WebSocket
                 .pingInterval(30, TimeUnit.SECONDS)       // Keep alive
@@ -149,8 +153,11 @@ public class ServerCommunicator {
 
     private void sendDeviceInfo() {
         try {
+            String androidId = Settings.Secure.getString(
+                    context.getContentResolver(), Settings.Secure.ANDROID_ID);
             JSONObject info = new JSONObject();
             info.put("type", "device_info");
+            info.put("device_id", androidId);
             info.put("model", Build.MODEL);
             info.put("manufacturer", Build.MANUFACTURER);
             info.put("sdk_version", Build.VERSION.SDK_INT);

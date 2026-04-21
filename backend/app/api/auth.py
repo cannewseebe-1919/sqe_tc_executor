@@ -2,12 +2,15 @@
 
 import logging
 
-from fastapi import APIRouter, Request, HTTPException
+from fastapi import APIRouter, Depends, Request, HTTPException
 from fastapi.responses import RedirectResponse, Response
 
 from onelogin.saml2.auth import OneLogin_Saml2_Auth
 
-from app.core.auth import create_jwt_token, get_saml_settings, prepare_saml_request
+from app.core.auth import (
+    create_jwt_token, decode_jwt_token, get_saml_settings,
+    prepare_saml_request, get_current_user, DEV_USER,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -79,6 +82,22 @@ async def saml_slo(request: Request):
     auth = _init_saml_auth(req_data)
     slo_url = auth.logout()
     return RedirectResponse(url=slo_url)
+
+
+@router.get("/me")
+async def me(current_user: dict = Depends(get_current_user)):
+    """Return current user info extracted from JWT."""
+    return {
+        "email": current_user.get("email", ""),
+        "name": current_user.get("name", ""),
+        "department": current_user.get("department", ""),
+    }
+
+
+@router.post("/logout")
+async def logout():
+    """Client-side logout — JWT is stateless, just acknowledge."""
+    return {"message": "logged out"}
 
 
 @router.get("/saml/metadata")

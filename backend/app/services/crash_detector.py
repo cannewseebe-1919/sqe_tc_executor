@@ -59,8 +59,9 @@ class CrashDetector:
     async def _logcat_monitor(self):
         """Stream logcat and match crash/ANR patterns."""
         try:
+            from app.services.adb_manager import adb_manager
             proc = await asyncio.create_subprocess_exec(
-                "adb", "-s", self.device_id, "logcat", "-v", "time",
+                adb_manager.adb_path, "-s", self.device_id, "logcat", "-v", "time", "-T", "1",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )

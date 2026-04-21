@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.core.config import get_settings
 from app.core.database import engine, Base
-from app.api import auth, devices, execution, streaming
+from app.api import auth, devices, execution, streaming, runner
 from app.services.device_monitor import device_monitor
 from app.services.scheduler import scheduler
 
@@ -73,6 +73,7 @@ app.include_router(auth.router)
 app.include_router(devices.router)
 app.include_router(execution.router)
 app.include_router(streaming.router)
+app.include_router(runner.router)
 
 # Static files (screenshots)
 import os

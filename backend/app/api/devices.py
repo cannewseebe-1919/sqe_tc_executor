@@ -12,6 +12,20 @@ from app.services.scheduler import scheduler
 router = APIRouter(prefix="/api/devices", tags=["devices"])
 
 
+def _device_out(d: Device, queue_length: int) -> DeviceOut:
+    return DeviceOut(
+        id=d.id,
+        name=d.name,
+        status=d.status,
+        model=d.model,
+        android_version=d.android_version,
+        resolution=d.resolution,
+        queue_length=queue_length,
+        connected_at=d.connected_at,
+        last_seen_at=d.last_seen_at,
+    )
+
+
 @router.get("", response_model=DeviceListOut)
 async def list_devices(db: AsyncSession = Depends(get_db)):
     """List all registered devices with their status and queue length."""
@@ -20,15 +34,7 @@ async def list_devices(db: AsyncSession = Depends(get_db)):
     out = []
     for d in devices:
         q_len = await scheduler.queue_length(d.id)
-        out.append(DeviceOut(
-            id=d.id,
-            name=d.name,
-            status=d.status,
-            model=d.model,
-            android_version=d.android_version,
-            resolution=d.resolution,
-            queue_length=q_len,
-        ))
+        out.append(_device_out(d, q_len))
     return DeviceListOut(devices=out)
 
 
@@ -38,15 +44,7 @@ async def get_device(device_id: str, db: AsyncSession = Depends(get_db)):
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
     q_len = await scheduler.queue_length(device.id)
-    return DeviceOut(
-        id=device.id,
-        name=device.name,
-        status=device.status,
-        model=device.model,
-        android_version=device.android_version,
-        resolution=device.resolution,
-        queue_length=q_len,
-    )
+    return _device_out(device, q_len)
 
 
 @router.patch("/{device_id}", response_model=DeviceOut)
@@ -62,12 +60,4 @@ async def update_device(
     await db.commit()
     await db.refresh(device)
     q_len = await scheduler.queue_length(device.id)
-    return DeviceOut(
-        id=device.id,
-        name=device.name,
-        status=device.status,
-        model=device.model,
-        android_version=device.android_version,
-        resolution=device.resolution,
-        queue_length=q_len,
-    )
+    return _device_out(device, q_len)
