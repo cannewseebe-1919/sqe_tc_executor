@@ -874,6 +874,14 @@ PYTHONPATH=. alembic stamp head
 PYTHONPATH=. alembic upgrade head
 ```
 
+### Runner App — CLEARTEXT communication not permitted
+```
+CLEARTEXT communication to localhost not permitted by network security policy
+```
+→ Android 9(API 28)+ 기본 정책이 `ws://` 평문 트래픽을 차단합니다.  
+→ v1.2.1 이상 APK를 사용하세요 (`runner-app/prebuilt/app-debug.apk`).  
+→ 직접 빌드 시 `res/xml/network_security_config.xml`이 포함되어 있는지 확인하세요.
+
 ---
 
 ## 연동 서비스
@@ -884,6 +892,18 @@ PYTHONPATH=. alembic upgrade head
 ---
 
 ## 버전 히스토리
+
+### v1.2.1 — 2026-04-22
+
+#### 버그 수정
+
+| 분류 | 항목 | 설명 |
+|------|------|------|
+| **Runner App 수정** | `network_security_config.xml` 추가 | Android 9+ 에서 `ws://localhost` 연결 시 발생하는 "CLEARTEXT not permitted" 오류 수정 |
+| **Runner App 수정** | `AndroidManifest.xml` | `networkSecurityConfig` 속성 추가 |
+| **Runner App** | `prebuilt/app-debug.apk` | 위 수정 사항 반영하여 재빌드 |
+
+---
 
 ### v1.2 — 2026-04-21
 
