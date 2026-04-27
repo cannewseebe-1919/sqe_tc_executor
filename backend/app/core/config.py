@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     # ADB
     ADB_PATH: str = "adb"
     ADB_POLL_INTERVAL: int = 5  # seconds
+    ADB_ENABLED: bool = True  # set False in DEV_MODE to skip real ADB polling
 
     # Runner App
     RUNNER_APP_PORT: int = 8080

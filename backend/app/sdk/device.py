@@ -21,7 +21,7 @@ class _Device:
     def __init__(self):
         self._device_id: str = ""
         self._adb: str = "adb"
-        self._runner_port: int = 18080
+        self._backend_port: int = 8001
         self._screenshot_dir: str = ""
         self._initialized = False
 
@@ -29,7 +29,7 @@ class _Device:
         if not self._initialized:
             self._device_id = os.environ.get("TC_DEVICE_ID", "")
             self._adb = os.environ.get("TC_ADB_PATH", "adb")
-            self._runner_port = int(os.environ.get("TC_RUNNER_APP_PORT", "8080"))
+            self._backend_port = int(os.environ.get("TC_BACKEND_PORT", "8001"))
             self._screenshot_dir = os.environ.get("TC_SCREENSHOT_DIR", "screenshots")
             os.makedirs(self._screenshot_dir, exist_ok=True)
             self._initialized = True
@@ -51,9 +51,11 @@ class _Device:
         return result.stdout.strip()
 
     def _runner_url(self) -> str:
-        return f"http://127.0.0.1:{self._runner_port}"
+        self._ensure_init()
+        return f"http://127.0.0.1:{self._backend_port}/runner/{self._device_id}"
 
     def _runner_get(self, path: str, params: dict = None, timeout: float = 10) -> dict:
+        self._ensure_init()
         with httpx.Client(timeout=timeout) as client:
             resp = client.get(f"{self._runner_url()}{path}", params=params or {})
             resp.raise_for_status()
@@ -215,17 +217,30 @@ class _Device:
     # ------------------------------------------------------------------
 
     def screenshot(self, name: str = "screenshot") -> str:
-        """Take a screenshot and save locally. Returns the file path."""
+        """Take a screenshot via Runner App and save locally. Returns the file path."""
         self._ensure_init()
-        remote_path = "/sdcard/tc_screenshot.png"
-        self._adb_shell(f"screencap -p {remote_path}")
-        local_path = os.path.join(self._screenshot_dir, f"{name}.png")
-        cmd = [self._adb]
-        if self._device_id:
-            cmd.extend(["-s", self._device_id])
-        cmd.extend(["pull", remote_path, local_path])
-        subprocess.run(cmd, capture_output=True, timeout=10)
-        return local_path
+        import base64
+        try:
+            with httpx.Client(timeout=15) as client:
+                resp = client.post(f"{self._runner_url()}/screenshot")
+                resp.raise_for_status()
+                data = resp.json()
+                png_bytes = base64.b64decode(data["data"])
+                local_path = os.path.join(self._screenshot_dir, f"{name}.png")
+                with open(local_path, "wb") as f:
+                    f.write(png_bytes)
+                return local_path
+        except Exception:
+            # Fallback to ADB screencap if Runner App is not connected
+            remote_path = "/sdcard/tc_screenshot.png"
+            self._adb_shell(f"screencap -p {remote_path}")
+            local_path = os.path.join(self._screenshot_dir, f"{name}.png")
+            cmd = [self._adb]
+            if self._device_id:
+                cmd.extend(["-s", self._device_id])
+            cmd.extend(["pull", remote_path, local_path])
+            subprocess.run(cmd, capture_output=True, timeout=10)
+            return local_path
 
     def get_logcat(self, filter: str = "", lines: int = 100) -> str:
         """Collect logcat logs."""

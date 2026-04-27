@@ -116,7 +116,7 @@ class TestRunner:
             env = os.environ.copy()
             env["TC_DEVICE_ID"] = device.id
             env["TC_EXECUTION_ID"] = execution_id
-            env["TC_RUNNER_APP_PORT"] = str(settings.RUNNER_APP_PORT)
+            env["TC_BACKEND_PORT"] = str(settings.BACKEND_EXTERNAL_PORT)
             env["TC_SCREENSHOT_DIR"] = os.path.join(settings.SCREENSHOT_DIR, execution_id)
             env["TC_ADB_PATH"] = settings.ADB_PATH
             os.makedirs(env["TC_SCREENSHOT_DIR"], exist_ok=True)

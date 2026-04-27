@@ -49,6 +49,9 @@ class DeviceMonitor:
         logger.info("DeviceMonitor stopped")
 
     async def _poll_loop(self):
+        if not settings.ADB_ENABLED:
+            logger.info("DeviceMonitor: ADB_ENABLED=False, skipping real device sync")
+            return
         while self._running:
             try:
                 await self._sync_devices()

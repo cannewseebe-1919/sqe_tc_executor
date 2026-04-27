@@ -20,8 +20,13 @@ class Scheduler:
         self._redis: Optional[redis.Redis] = None
 
     async def connect(self):
-        self._redis = redis.from_url(settings.REDIS_URL, decode_responses=True)
-        logger.info("Scheduler connected to Redis")
+        if settings.DEV_MODE:
+            from fakeredis import aioredis as fakeredis
+            self._redis = fakeredis.FakeRedis(decode_responses=True)
+            logger.info("Scheduler using in-memory fakeredis (DEV_MODE)")
+        else:
+            self._redis = redis.from_url(settings.REDIS_URL, decode_responses=True)
+            logger.info("Scheduler connected to Redis")
 
     async def disconnect(self):
         if self._redis:
