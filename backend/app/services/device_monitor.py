@@ -3,6 +3,7 @@
 import asyncio
 import logging
 from datetime import datetime, timezone
+from typing import Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -89,10 +90,32 @@ class DeviceMonitor:
 
             await session.commit()
 
-        # After commit: set up adb reverse and process queued executions for reconnected devices
+        # After commit: set up adb reverse, map runner serial, process queued executions
         for serial in reconnected:
             await _setup_adb_reverse(serial)
+            await self._map_runner_serial(serial)
             await self._process_queued(serial)
+
+        # Also try mapping for already-connected devices on each poll cycle
+        for serial, device in db_devices.items():
+            if serial in connected_serials and device.status != "OFFLINE":
+                await self._map_runner_serial(serial, model=device.model)
+
+    async def _map_runner_serial(self, serial: str, model: Optional[str] = None):
+        """Match adb serial to Runner App android_id via model name."""
+        from app.services.runner_registry import runner_registry
+        if runner_registry.resolve(serial):
+            return  # already mapped
+        if model is None:
+            async with async_session() as session:
+                from app.models.device import Device
+                device = await session.get(Device, serial)
+                model = device.model if device else None
+        if not model:
+            return
+        android_id = runner_registry.find_android_id_by_model(model)
+        if android_id:
+            runner_registry.map_serial(serial, android_id)
 
     async def _process_queued(self, device_id: str):
         """Start the next queued execution for a device that just came back online."""

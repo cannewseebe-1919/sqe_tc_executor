@@ -32,7 +32,11 @@ async def runner_websocket(websocket: WebSocket):
                 if not device_id:
                     logger.warning("Runner App sent device_info without device_id")
                     continue
-                await runner_registry.register(device_id, websocket)
+                adb_serial = msg.get("adb_serial") or None
+                model = msg.get("model") or None
+                await runner_registry.register(
+                    device_id, websocket, adb_serial=adb_serial, model=model
+                )
             else:
                 await runner_registry.handle_message(device_id, msg)
 

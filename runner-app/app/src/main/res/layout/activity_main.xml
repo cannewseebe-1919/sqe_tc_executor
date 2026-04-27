@@ -37,7 +37,7 @@
         android:layout_height="wrap_content"
         android:hint="@string/hint_server_url"
         android:inputType="textUri"
-        android:text="ws://10.0.2.2:8080/ws/runner"
+        android:text="ws://localhost:8001/ws/runner"
         android:layout_marginBottom="8dp" />
 
     <TextView

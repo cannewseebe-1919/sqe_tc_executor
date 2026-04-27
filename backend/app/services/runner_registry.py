@@ -14,22 +14,62 @@ COMMAND_TIMEOUT = 15  # seconds
 
 
 class RunnerRegistry:
-    """Maps android_id → active Runner App WebSocket, handles request/response."""
+    """Maps android_id → active Runner App WebSocket, handles request/response.
+
+    Also maintains a secondary adb_serial → android_id mapping so that
+    test_runner (which knows only the adb serial) can find the right connection.
+    """
 
     def __init__(self):
         self._connections: dict[str, WebSocket] = {}
         self._pending: dict[str, asyncio.Future] = {}
+        # adb_serial → android_id
+        self._serial_to_android_id: dict[str, str] = {}
+        # android_id → model (for model-based serial matching)
+        self._android_id_to_model: dict[str, str] = {}
 
-    async def register(self, device_id: str, ws: WebSocket):
-        self._connections[device_id] = ws
-        logger.info("Runner connected: %s", device_id)
+    async def register(self, android_id: str, ws: WebSocket,
+                       adb_serial: Optional[str] = None, model: Optional[str] = None):
+        self._connections[android_id] = ws
+        if model:
+            self._android_id_to_model[android_id] = model
+        if adb_serial:
+            self._serial_to_android_id[adb_serial] = android_id
+        logger.info("Runner connected: android_id=%s adb_serial=%s model=%s",
+                    android_id, adb_serial, model)
 
-    async def unregister(self, device_id: str):
-        self._connections.pop(device_id, None)
-        logger.info("Runner disconnected: %s", device_id)
+    def find_android_id_by_model(self, model: str) -> Optional[str]:
+        """Return android_id of a connected Runner App whose model matches."""
+        for android_id, m in self._android_id_to_model.items():
+            if android_id in self._connections and m == model:
+                return android_id
+        return None
+
+    async def unregister(self, android_id: str):
+        self._connections.pop(android_id, None)
+        # Remove reverse mapping entries pointing to this android_id
+        stale = [s for s, a in self._serial_to_android_id.items() if a == android_id]
+        for s in stale:
+            del self._serial_to_android_id[s]
+        logger.info("Runner disconnected: %s", android_id)
+
+    def map_serial(self, adb_serial: str, android_id: str):
+        """Explicitly set adb_serial → android_id mapping (called by device_monitor)."""
+        self._serial_to_android_id[adb_serial] = android_id
+        logger.info("Runner serial mapped: %s → %s", adb_serial, android_id)
+
+    def resolve(self, device_id: str) -> Optional[str]:
+        """Return the android_id to use for WebSocket lookup.
+
+        Accepts either an android_id (returned as-is if connected) or
+        an adb_serial (looked up via the mapping table).
+        """
+        if device_id in self._connections:
+            return device_id
+        return self._serial_to_android_id.get(device_id)
 
     def is_connected(self, device_id: str) -> bool:
-        return device_id in self._connections
+        return self.resolve(device_id) is not None
 
     async def handle_message(self, device_id: Optional[str], msg: dict):
         request_id = msg.get("request_id", "")
@@ -40,7 +80,8 @@ class RunnerRegistry:
             logger.debug("Unmatched message from %s: type=%s", device_id, msg.get("type"))
 
     async def send_command(self, device_id: str, cmd_type: str, **params) -> dict:
-        ws = self._connections.get(device_id)
+        android_id = self.resolve(device_id)
+        ws = self._connections.get(android_id) if android_id else None
         if ws is None:
             raise RuntimeError(f"Runner App not connected for device {device_id}")
 

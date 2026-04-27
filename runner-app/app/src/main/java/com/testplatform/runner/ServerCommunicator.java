@@ -155,9 +155,18 @@ public class ServerCommunicator {
         try {
             String androidId = Settings.Secure.getString(
                     context.getContentResolver(), Settings.Secure.ANDROID_ID);
+            // adb_serial: read from system property (available on USB-connected devices)
+            String adbSerial = "";
+            try {
+                Process p = Runtime.getRuntime().exec(new String[]{"getprop", "ro.boot.serialno"});
+                byte[] buf = p.getInputStream().readAllBytes();
+                adbSerial = new String(buf).trim();
+            } catch (Exception ignored) {}
+
             JSONObject info = new JSONObject();
             info.put("type", "device_info");
             info.put("device_id", androidId);
+            info.put("adb_serial", adbSerial);
             info.put("model", Build.MODEL);
             info.put("manufacturer", Build.MANUFACTURER);
             info.put("sdk_version", Build.VERSION.SDK_INT);
