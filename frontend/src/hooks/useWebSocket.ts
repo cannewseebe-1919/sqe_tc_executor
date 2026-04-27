@@ -18,7 +18,7 @@ export function useWebSocket({
   enabled = true,
 }: UseWebSocketOptions) {
   const wsRef = useRef<WebSocket | null>(null);
-  const reconnectTimer = useRef<ReturnType<typeof setTimeout>>();
+  const reconnectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [connected, setConnected] = useState(false);
 
   const connect = useCallback(() => {
