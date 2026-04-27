@@ -126,6 +126,7 @@ export default function DeviceListPage() {
               device={device}
               onUpdate={() => fetchDevices()}
               onStreamClick={(id) => navigate(`/stream/${id}`)}
+              onExecuted={() => navigate('/history')}
             />
           ))}
         </div>

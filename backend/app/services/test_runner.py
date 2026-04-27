@@ -124,10 +124,12 @@ class TestRunner:
             # Execute TC in subprocess
             sdk_path = str(Path(__file__).resolve().parent.parent / "sdk")
             env["PYTHONPATH"] = sdk_path + os.pathsep + env.get("PYTHONPATH", "")
+            env["PYTHONIOENCODING"] = "utf-8"
+            env["PYTHONUTF8"] = "1"
 
             try:
                 proc = await asyncio.create_subprocess_exec(
-                    "python", "-u", tc_file,
+                    "python", "-X", "utf8", "-u", tc_file,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                     env=env,

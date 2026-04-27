@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { Smartphone, Monitor, Pencil, Check, X } from 'lucide-react';
+import { Smartphone, Monitor, Pencil, Check, X, Play } from 'lucide-react';
 import type { Device } from '../../types';
 import { updateDeviceName } from '../../services/api';
+import ExecuteModal from './ExecuteModal';
 
 const STATUS_CONFIG: Record<string, {
   label: string; color: string; bg: string; accent: string; pulse?: boolean;
@@ -17,12 +18,14 @@ interface Props {
   device: Device;
   onUpdate: () => void;
   onStreamClick: (deviceId: string) => void;
+  onExecuted?: (executionId: string) => void;
 }
 
-export default function DeviceCard({ device, onUpdate, onStreamClick }: Props) {
+export default function DeviceCard({ device, onUpdate, onStreamClick, onExecuted }: Props) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(device.name);
   const [saving, setSaving] = useState(false);
+  const [showExecute, setShowExecute] = useState(false);
   const status = STATUS_CONFIG[device.status] ?? STATUS_CONFIG.OFFLINE;
 
   const handleSave = async () => {
@@ -135,7 +138,7 @@ export default function DeviceCard({ device, onUpdate, onStreamClick }: Props) {
       {/* Actions */}
       <div className="device-actions">
         <button
-          className="btn btn-primary"
+          className="btn btn-ghost"
           style={{ flex: 1 }}
           onClick={() => onStreamClick(device.id)}
           disabled={isOffline}
@@ -143,7 +146,27 @@ export default function DeviceCard({ device, onUpdate, onStreamClick }: Props) {
           <Monitor size={13} />
           화면 보기
         </button>
+        <button
+          className="btn btn-primary"
+          style={{ flex: 1 }}
+          onClick={() => setShowExecute(true)}
+          disabled={isOffline}
+        >
+          <Play size={13} />
+          TC 실행
+        </button>
       </div>
+
+      {showExecute && (
+        <ExecuteModal
+          device={device}
+          onClose={() => setShowExecute(false)}
+          onSubmitted={(id) => {
+            setShowExecute(false);
+            onExecuted?.(id);
+          }}
+        />
+      )}
     </div>
   );
 }

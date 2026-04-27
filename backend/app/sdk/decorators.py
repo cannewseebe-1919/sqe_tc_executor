@@ -57,15 +57,15 @@ def step(name: str, timeout: Optional[int] = None):
             # Check for auto-screenshot
             screenshot_dir = os.environ.get("TC_SCREENSHOT_DIR", "")
             if screenshot_dir:
-                from app.sdk.device import device as dev
                 try:
+                    from device import device as dev
                     path = dev.screenshot(func.__name__)
                     result["screenshot_path"] = path
                 except Exception:
                     pass
 
-            # Emit result as JSON line
-            print(f"[STEP_RESULT]{json.dumps(result, ensure_ascii=False)}", flush=True)
+            # Emit result as JSON line (ensure_ascii=True avoids Windows stdout encoding issues)
+            print(f"[STEP_RESULT]{json.dumps(result, ensure_ascii=True)}", flush=True)
             return result
 
         return wrapper
