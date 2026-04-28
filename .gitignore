@@ -32,3 +32,11 @@ screenshots/
 .idea/
 *.iml
 .vscode/
+
+# SQLite dev DB
+*.db
+*.db-shm
+*.db-wal
+
+# Claude Code memory
+.claude/
