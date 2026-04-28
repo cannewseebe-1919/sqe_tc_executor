@@ -219,6 +219,13 @@ public class MainActivity extends AppCompatActivity {
                 .format(new java.util.Date());
         String line = "[" + timestamp + "] " + message + "\n";
         tvLog.append(line);
+        tvLog.post(() -> {
+            final android.text.Layout layout = tvLog.getLayout();
+            if (layout != null) {
+                int scrollAmount = layout.getLineBottom(tvLog.getLineCount() - 1) - tvLog.getHeight();
+                if (scrollAmount > 0) tvLog.scrollTo(0, scrollAmount);
+            }
+        });
         Log.d(TAG, message);
     }
 }
