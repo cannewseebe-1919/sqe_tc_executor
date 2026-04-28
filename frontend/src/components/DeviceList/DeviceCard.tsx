@@ -1,7 +1,7 @@
-import { useState } from 'react';
-import { Smartphone, Monitor, Pencil, Check, X, Play } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Smartphone, Monitor, Pencil, Check, X, Play, Radio } from 'lucide-react';
 import type { Device } from '../../types';
-import { updateDeviceName } from '../../services/api';
+import { updateDeviceName, getRunnerStatus } from '../../services/api';
 import ExecuteModal from './ExecuteModal';
 
 const STATUS_CONFIG: Record<string, {
@@ -26,7 +26,24 @@ export default function DeviceCard({ device, onUpdate, onStreamClick, onExecuted
   const [name, setName] = useState(device.name);
   const [saving, setSaving] = useState(false);
   const [showExecute, setShowExecute] = useState(false);
+  const [runnerConnected, setRunnerConnected] = useState<boolean | null>(null);
   const status = STATUS_CONFIG[device.status] ?? STATUS_CONFIG.OFFLINE;
+
+  useEffect(() => {
+    if (device.status === 'OFFLINE') { setRunnerConnected(false); return; }
+    let cancelled = false;
+    const check = async () => {
+      try {
+        const res = await getRunnerStatus(device.id);
+        if (!cancelled) setRunnerConnected(res.connected);
+      } catch {
+        if (!cancelled) setRunnerConnected(false);
+      }
+    };
+    check();
+    const t = setInterval(check, 5000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, [device.id, device.status]);
 
   const handleSave = async () => {
     if (!name.trim() || name === device.name) {
@@ -133,6 +150,25 @@ export default function DeviceCard({ device, onUpdate, onStreamClick, onExecuted
         </div>
       </div>
 
+      {/* Runner App 연결 상태 */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 6,
+        padding: '6px 10px', borderRadius: 6, marginBottom: 8,
+        background: runnerConnected ? 'rgba(34,197,94,0.08)' : 'rgba(100,116,139,0.08)',
+        border: `1px solid ${runnerConnected ? 'rgba(34,197,94,0.2)' : 'rgba(100,116,139,0.2)'}`,
+      }}>
+        <Radio size={12} style={{ color: runnerConnected ? '#22c55e' : '#64748b', flexShrink: 0 }} />
+        <span style={{ fontSize: 11, color: runnerConnected ? '#22c55e' : '#64748b', fontWeight: 500 }}>
+          Runner App {runnerConnected === null ? '확인 중...' : runnerConnected ? '연결됨' : '미연결'}
+        </span>
+        {runnerConnected && (
+          <span style={{
+            marginLeft: 'auto', width: 6, height: 6, borderRadius: '50%',
+            background: '#22c55e', animation: 'pulse-green 2s infinite',
+          }} />
+        )}
+      </div>
+
       <div className="device-serial">{device.id}</div>
 
       {/* Actions */}
@@ -167,6 +203,9 @@ export default function DeviceCard({ device, onUpdate, onStreamClick, onExecuted
           }}
         />
       )}
+      <style>{`
+        @keyframes pulse-green { 0%,100% { opacity:1; } 50% { opacity:0.3; } }
+      `}</style>
     </div>
   );
 }

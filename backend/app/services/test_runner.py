@@ -143,6 +143,17 @@ class TestRunner:
                 )
                 output = stdout.decode("utf-8", errors="replace")
                 err_output = stderr.decode("utf-8", errors="replace")
+                exit_code = proc.returncode
+                logger.info(
+                    "TC subprocess finished (exit=%d) for execution %s",
+                    exit_code, execution_id,
+                )
+                if err_output.strip():
+                    logger.warning(
+                        "TC stderr for execution %s:\n%s", execution_id, err_output
+                    )
+                if exit_code != 0 and not abort_reason:
+                    abort_reason = "EXECUTION_ERROR"
             except asyncio.TimeoutError:
                 abort_reason = "EXECUTION_TIMEOUT"
                 output = ""
@@ -155,6 +166,13 @@ class TestRunner:
                 abort_reason = "EXECUTION_ERROR"
                 output = ""
                 err_output = str(e)
+                logger.error("TC subprocess launch failed for %s: %s", execution_id, e)
+
+            if abort_reason:
+                logger.warning(
+                    "Execution %s aborted: reason=%s err=%s",
+                    execution_id, abort_reason, err_output[:500] if err_output else "",
+                )
 
             # Stop crash detector
             await crash_detector.stop()

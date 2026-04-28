@@ -7,16 +7,16 @@ export default defineConfig({
     port: 3001,
     proxy: {
       '/api': {
-        target: 'http://localhost:8001',
+        target: 'http://localhost:9000',
         changeOrigin: true,
         ws: true,
       },
       '/auth': {
-        target: 'http://localhost:8001',
+        target: 'http://localhost:9000',
         changeOrigin: true,
       },
       '/screenshots': {
-        target: 'http://localhost:8001',
+        target: 'http://localhost:9000',
         changeOrigin: true,
       },
     },

@@ -52,7 +52,7 @@ class _Device:
 
     def _runner_url(self) -> str:
         self._ensure_init()
-        return f"http://127.0.0.1:{self._backend_port}/runner/{self._device_id}"
+        return f"http://127.0.0.1:{self._backend_port}/api/runner/{self._device_id}"
 
     def _runner_get(self, path: str, params: dict = None, timeout: float = 10) -> dict:
         self._ensure_init()

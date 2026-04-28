@@ -14,7 +14,7 @@ router = APIRouter(tags=["runner"])
 
 
 @router.websocket("/ws/runner")
-async def runner_websocket(websocket: WebSocket):
+async def runner_websocket(websocket: WebSocket):  # WebSocket은 /api 없이 유지
     """Runner App connects here and receives commands, sends back results."""
     await websocket.accept()
     device_id = None
@@ -54,14 +54,14 @@ async def runner_websocket(websocket: WebSocket):
 # These forward requests to the Runner App over its active WebSocket connection.
 # ---------------------------------------------------------------------------
 
-@router.get("/runner/{device_id}/status")
+@router.get("/api/runner/{device_id}/status")
 async def runner_status(device_id: str):
     """Check if Runner App is connected for this device."""
     connected = runner_registry.is_connected(device_id)
     return {"device_id": device_id, "connected": connected}
 
 
-@router.get("/runner/{device_id}/ui-tree")
+@router.get("/api/runner/{device_id}/ui-tree")
 async def get_ui_tree(device_id: str):
     """Return full UI tree from the Runner App."""
     if not runner_registry.is_connected(device_id):
@@ -75,7 +75,7 @@ async def get_ui_tree(device_id: str):
         raise HTTPException(status_code=502, detail=str(e))
 
 
-@router.get("/runner/{device_id}/find-element")
+@router.get("/api/runner/{device_id}/find-element")
 async def find_element(
     device_id: str,
     text: Optional[str] = Query(None),
@@ -100,7 +100,7 @@ async def find_element(
         raise HTTPException(status_code=502, detail=str(e))
 
 
-@router.post("/runner/{device_id}/screenshot")
+@router.post("/api/runner/{device_id}/screenshot")
 async def take_screenshot(device_id: str):
     """Take a screenshot and return as base64 PNG."""
     if not runner_registry.is_connected(device_id):
@@ -115,7 +115,7 @@ async def take_screenshot(device_id: str):
         raise HTTPException(status_code=502, detail=str(e))
 
 
-@router.post("/runner/{device_id}/ping")
+@router.post("/api/runner/{device_id}/ping")
 async def ping_runner(device_id: str):
     """Ping the Runner App to check accessibility/screen-capture status."""
     if not runner_registry.is_connected(device_id):

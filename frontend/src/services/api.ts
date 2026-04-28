@@ -91,6 +91,12 @@ export async function logout(): Promise<void> {
   localStorage.removeItem('access_token');
 }
 
+// --- Runner App ---
+export async function getRunnerStatus(deviceId: string): Promise<{ connected: boolean }> {
+  const { data } = await api.get(`/runner/${deviceId}/status`);
+  return data;
+}
+
 // --- Streaming ---
 export function createStreamWebSocket(deviceId: string): WebSocket {
   const wsBase = import.meta.env.VITE_WS_BASE_URL ||

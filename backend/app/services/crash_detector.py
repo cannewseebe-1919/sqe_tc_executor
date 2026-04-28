@@ -60,8 +60,12 @@ class CrashDetector:
         """Stream logcat and match crash/ANR patterns."""
         try:
             from app.services.adb_manager import adb_manager
+            # -T 1 은 이전 크래시 로그를 잡아 오탐을 일으킴.
+            # 현재 시각 기준으로 새 로그만 읽도록 -T "MM-DD HH:MM:SS.mmm" 사용.
+            import datetime as _dt
+            now = _dt.datetime.now().strftime("%m-%d %H:%M:%S.000")
             proc = await asyncio.create_subprocess_exec(
-                adb_manager.adb_path, "-s", self.device_id, "logcat", "-v", "time", "-T", "1",
+                adb_manager.adb_path, "-s", self.device_id, "logcat", "-v", "time", "-T", now,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -98,17 +102,32 @@ class CrashDetector:
 
     async def _adb_connection_monitor(self):
         """Periodically check if device is still reachable."""
+        consecutive_misses = 0
         try:
             while self._running:
-                devices = await adb_manager.list_devices()
-                serials = {d["serial"] for d in devices if d["status"] == "device"}
-                if self.device_id not in serials:
-                    logger.warning("Device %s disconnected — possible kernel panic", self.device_id)
-                    event = CrashEvent(self.device_id, "KERNEL_PANIC", log="ADB connection lost")
-                    self._crash_logs.append("[KERNEL_PANIC] ADB connection lost")
-                    if self._on_crash:
-                        await self._on_crash(event)
-                    break
                 await asyncio.sleep(3)
+                try:
+                    devices = await adb_manager.list_devices()
+                except Exception:
+                    logger.debug("adb list_devices failed in crash monitor — skipping")
+                    continue
+                serials = {d["serial"] for d in devices if d["status"] == "device"}
+                if not serials:
+                    # adb returned empty — likely transient error, don't trigger panic
+                    consecutive_misses += 1
+                    logger.debug("adb returned empty device list (miss #%d)", consecutive_misses)
+                    continue
+                if self.device_id not in serials:
+                    consecutive_misses += 1
+                    logger.debug("Device %s not in adb list (miss #%d)", self.device_id, consecutive_misses)
+                    if consecutive_misses >= 3:
+                        logger.warning("Device %s disconnected — possible kernel panic", self.device_id)
+                        event = CrashEvent(self.device_id, "KERNEL_PANIC", log="ADB connection lost")
+                        self._crash_logs.append("[KERNEL_PANIC] ADB connection lost")
+                        if self._on_crash:
+                            await self._on_crash(event)
+                        break
+                else:
+                    consecutive_misses = 0
         except asyncio.CancelledError:
             pass
