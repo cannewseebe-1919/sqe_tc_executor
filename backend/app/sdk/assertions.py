@@ -2,7 +2,7 @@
 
 from typing import Optional
 
-from app.sdk.device import device
+from .device import device
 
 
 def assert_screen(

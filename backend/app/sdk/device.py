@@ -193,7 +193,7 @@ class _Device:
         timeout: int = 10,
     ) -> dict:
         """Wait until an element appears on screen."""
-        from app.sdk.decorators import ElementNotFoundError
+        from .decorators import ElementNotFoundError
 
         deadline = time.time() + timeout
         while time.time() < deadline:
@@ -273,7 +273,7 @@ class _Device:
         xy: Optional[Tuple[int, int]] = None,
     ) -> Tuple[int, int]:
         """Resolve element to (x, y) center coordinates."""
-        from app.sdk.decorators import ElementNotFoundError
+        from .decorators import ElementNotFoundError
 
         if xy:
             return xy

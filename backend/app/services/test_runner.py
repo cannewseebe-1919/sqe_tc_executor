@@ -124,8 +124,9 @@ class TestRunner:
             os.makedirs(screenshot_dir, exist_ok=True)
 
             # Execute TC in subprocess
-            sdk_path = str(Path(__file__).resolve().parent.parent / "sdk")
-            env["PYTHONPATH"] = sdk_path + os.pathsep + env.get("PYTHONPATH", "")
+            # backend/ 를 PYTHONPATH에 추가해야 app.sdk 및 tc_executor_sdk 모두 import 가능
+            backend_path = str(Path(__file__).resolve().parent.parent.parent)
+            env["PYTHONPATH"] = backend_path + os.pathsep + env.get("PYTHONPATH", "")
             env["PYTHONIOENCODING"] = "utf-8"
             env["PYTHONUTF8"] = "1"
 

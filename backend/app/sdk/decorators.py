@@ -58,7 +58,7 @@ def step(name: str, timeout: Optional[int] = None):
             screenshot_dir = os.environ.get("TC_SCREENSHOT_DIR", "")
             if screenshot_dir:
                 try:
-                    from device import device as dev
+                    from app.sdk.device import device as dev
                     path = dev.screenshot(func.__name__)
                     result["screenshot_path"] = path
                 except Exception:
