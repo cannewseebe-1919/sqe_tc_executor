@@ -77,10 +77,19 @@ app.include_router(runner.router)
 
 # Static files (screenshots)
 import os
-os.makedirs(settings.SCREENSHOT_DIR, exist_ok=True)
-app.mount("/screenshots", StaticFiles(directory=settings.SCREENSHOT_DIR), name="screenshots")
+from pathlib import Path as _Path
+_screenshot_abs = str(_Path(__file__).resolve().parent.parent / settings.SCREENSHOT_DIR)
+os.makedirs(_screenshot_abs, exist_ok=True)
+app.mount("/screenshots", StaticFiles(directory=_screenshot_abs), name="screenshots")
 
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": settings.APP_NAME}
+    from pathlib import Path as _P
+    import app.services.test_runner as _tr
+    return {
+        "status": "ok",
+        "service": settings.APP_NAME,
+        "screenshot_abs": _screenshot_abs,
+        "tr_file": str(_P(_tr.__file__).resolve()),
+    }

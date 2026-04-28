@@ -117,9 +117,11 @@ class TestRunner:
             env["TC_DEVICE_ID"] = device.id
             env["TC_EXECUTION_ID"] = execution_id
             env["TC_BACKEND_PORT"] = str(settings.BACKEND_EXTERNAL_PORT)
-            env["TC_SCREENSHOT_DIR"] = os.path.join(settings.SCREENSHOT_DIR, execution_id)
+            _base = Path(__file__).resolve().parent.parent.parent  # backend/
+            screenshot_dir = str(_base / settings.SCREENSHOT_DIR / execution_id)
+            env["TC_SCREENSHOT_DIR"] = screenshot_dir
             env["TC_ADB_PATH"] = settings.ADB_PATH
-            os.makedirs(env["TC_SCREENSHOT_DIR"], exist_ok=True)
+            os.makedirs(screenshot_dir, exist_ok=True)
 
             # Execute TC in subprocess
             sdk_path = str(Path(__file__).resolve().parent.parent / "sdk")

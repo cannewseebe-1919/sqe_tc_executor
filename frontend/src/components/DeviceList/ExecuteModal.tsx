@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { X, Play, ChevronDown } from 'lucide-react';
 import { executeTest } from '../../services/api';
 import type { Device } from '../../types';
@@ -179,7 +180,7 @@ export default function ExecuteModal({ device, onClose, onSubmitted }: Props) {
     }
   };
 
-  return (
+  return createPortal(
     <>
       {/* Backdrop */}
       <div
@@ -371,6 +372,7 @@ export default function ExecuteModal({ device, onClose, onSubmitted }: Props) {
         </div>
       </div>
       <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
-    </>
+    </>,
+    document.body
   );
 }

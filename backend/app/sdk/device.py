@@ -233,7 +233,7 @@ class _Device:
         except Exception:
             # Fallback to ADB screencap if Runner App is not connected
             remote_path = "/sdcard/tc_screenshot.png"
-            self._adb_shell(f"screencap -p {remote_path}")
+            self._adb_shell(f"screencap {remote_path}")
             local_path = os.path.join(self._screenshot_dir, f"{name}.png")
             cmd = [self._adb]
             if self._device_id:
