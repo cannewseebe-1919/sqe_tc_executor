@@ -250,6 +250,17 @@ class TestRunner:
             self._active_runs.pop(execution_id, None)
             await self._process_next(device.id)
 
+    def _to_screenshot_url(self, local_path: Optional[str]) -> Optional[str]:
+        """로컬 파일 경로를 HTTP URL로 변환."""
+        if not local_path:
+            return None
+        try:
+            screenshot_base = Path(__file__).resolve().parent.parent.parent / settings.SCREENSHOT_DIR
+            rel = Path(local_path).relative_to(screenshot_base)
+            return f"/screenshots/{rel.as_posix()}"
+        except ValueError:
+            return None
+
     async def _send_callback(
         self, execution: Execution, device: Device,
         steps_data: list, passed: int, failed: int,
@@ -263,7 +274,7 @@ class TestRunner:
                 step_order=sd.get("step_order", i + 1),
                 status=sd.get("status", "PASSED"),
                 duration_sec=sd.get("duration_sec", 0),
-                screenshot_url=sd.get("screenshot_path"),
+                screenshot_url=self._to_screenshot_url(sd.get("screenshot_path")),
                 log=sd.get("log", ""),
                 error_type=sd.get("error_type"),
             )
@@ -291,15 +302,23 @@ class TestRunner:
                 resolution=device.resolution,
             ),
         )
-        try:
-            async with httpx.AsyncClient(timeout=30) as client:
-                resp = await client.post(
-                    execution.callback_url,
-                    json=result.model_dump(mode="json"),
-                )
-                logger.info("Callback sent to %s (status=%d)", execution.callback_url, resp.status_code)
-        except Exception:
-            logger.exception("Failed to send callback to %s", execution.callback_url)
+        delays = [1, 3]
+        for attempt in range(3):
+            try:
+                async with httpx.AsyncClient(timeout=30) as client:
+                    resp = await client.post(
+                        execution.callback_url,
+                        json=result.model_dump(mode="json"),
+                    )
+                    resp.raise_for_status()
+                    logger.info("Callback sent to %s (status=%d)", execution.callback_url, resp.status_code)
+                    return
+            except Exception as e:
+                if attempt < 2:
+                    logger.warning("Callback attempt %d failed (%s), retrying in %ds…", attempt + 1, e, delays[attempt])
+                    await asyncio.sleep(delays[attempt])
+                else:
+                    logger.exception("Callback failed after 3 attempts: %s", execution.callback_url)
 
     async def _process_next(self, device_id: str):
         """Dequeue and run next execution for a device."""
