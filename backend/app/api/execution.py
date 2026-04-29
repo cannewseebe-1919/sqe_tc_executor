@@ -259,7 +259,7 @@ async def list_executions(
             ExecutionSummaryOut(
                 id=e.id,
                 device_id=e.device_id,
-                device_name=devices.get(e.device_id, None) and devices[e.device_id].name,
+                device_name=devices[e.device_id].name if e.device_id in devices else None,
                 requested_by=e.requested_by,
                 status=e.status,
                 queue_position=e.queue_position,

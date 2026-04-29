@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import re
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Callable, Optional, Awaitable
 
@@ -35,7 +36,7 @@ class CrashDetector:
         self._on_crash = on_crash
         self._running = False
         self._tasks: list[asyncio.Task] = []
-        self._crash_logs: list[str] = []
+        self._crash_logs: deque[str] = deque(maxlen=500)
 
     @property
     def crash_logs(self) -> list[str]:

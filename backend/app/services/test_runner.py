@@ -57,11 +57,13 @@ class TestRunner:
             execution = await session.get(Execution, execution_id)
             if not execution:
                 logger.error("Execution %s not found", execution_id)
+                self._active_runs.pop(execution_id, None)
                 return
 
             device = await session.get(Device, execution.device_id)
             if not device:
                 logger.error("Device %s not found", execution.device_id)
+                self._active_runs.pop(execution_id, None)
                 return
 
             # Update state

@@ -136,6 +136,8 @@ class ScreenStreamer:
             pass
         finally:
             stream.remove(ws)
+            if not stream.active:
+                self._streams.pop(device_id, None)
 
     async def stop_all(self):
         pass
